@@ -1,16 +1,10 @@
 # DAMIC
 Dialogue Act Modelling in Information-seeking Conversations
 
-
-
 ## Prerequisites
 - MSDialog-Intent.json file (from MSdialog dataset; see https://ciir.cs.umass.edu/downloads/msdialog/ for information)
-- 
-- Python 3 with PyTorch?
-- 
-
-
-
+- Stanford NER (https://nlp.stanford.edu/software/CRF-NER.shtml)
+- Python 3 with PyTorch, pandas and sklearn 
 
 
 ## Preprocessing *MSdialog-Intent.json* file
@@ -22,4 +16,10 @@ Dialogue Act Modelling in Information-seeking Conversations
 ## Markov chain
 - Use *markov_chain.py* to produce Markov chain from original *MSDialog-Intent.json* file
 
-## TODO: Yue 
+## Baseline Model
+- Train: python models/baseline.py train
+- Test: python models/baseline.py test [model directory]
+
+## DAMIC Model
+- Train: python models/RNN.py train
+- Test: python models/RNN.py test [model directory]
