@@ -248,7 +248,7 @@ elif sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '':
         model = model.to(device)
         model.load_state_dict(torch.load(directory+filename))
         model.eval()
-        criterion = nn.MSELoss()
+        criterion = nn.BCELoss()
         n_iters = len(X_test)
 
         # ROC
