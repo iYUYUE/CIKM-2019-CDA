@@ -60,7 +60,8 @@ class SimpleRNN(nn.Module):
         inp = self.h2h(inp)
         # inp = self.h2h(inp)
         
-        hidden = self.i2h(torch.cat((inp, torch.squeeze(output2)), 0))
+        # hidden = self.i2h(torch.cat((inp, torch.squeeze(output2)), 0))
+        hidden = self.i2h(torch.cat((inp, torch.squeeze(hidden2[0])), 0))
         
         hidden = self.h2h(hidden)
         hidden = self.h2h(hidden)
@@ -86,15 +87,15 @@ class SimpleRNN(nn.Module):
                 outputs[i+1] = out
         return outputs, hidden
 
-    def initHidden(self):
-        hidden = torch.zeros(2, 1, self.hidden_size).to(device)
-        cell = torch.zeros(2, 1, self.hidden_size).to(device)
+    def initHidden(self, num_layers):
+        hidden = torch.zeros(num_layers, 1, self.hidden_size).to(device)
+        cell = torch.zeros(num_layers, 1, self.hidden_size).to(device)
         return (hidden, cell)
 
 
 # read in curpus
 ms_tags = ['CQ', 'FD', 'FQ', 'GG', 'IR', 'JK', 'NF', 'O', 'OQ', 'PA', 'PF', 'RQ']
-ms_entitiedbowpath = os.path.normpath("../data/msdialog/entitied_msdialog.csv")
+ms_entitiedbowpath = os.path.normpath("../data/msdialog/collapsed_msdialog.csv")
 
 
 df = pd.read_csv(ms_entitiedbowpath)
@@ -176,6 +177,7 @@ def Find_Optimal_Cutoff(target, predicted):
 hidden_size = 128
 output_size = len(ms_tags)
 data_size = len(bow_index)
+num_layers = 2
 
 if sys.argv[1] == 'train':
 
@@ -198,7 +200,7 @@ if sys.argv[1] == 'train':
         for i in range(n_iters):
             inputs = Variable(torch.from_numpy(np.array([str2vector(bow_index, sent, True) for sent in X_train[i]])).float()).to(device)
             targets = Variable(torch.from_numpy(np.array([str2vector(ms_tags, sent, False) for sent in y_train[i]])).float()).to(device)
-            hidden = model.initHidden()
+            hidden = model.initHidden(num_layers)
             # print(targets)
 
             outputs, hidden = model(inputs, targets, hidden)
@@ -256,7 +258,7 @@ elif sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '':
         for i in range(n_iters):
             inputs = Variable(torch.from_numpy(np.array([str2vector(bow_index, sent, True) for sent in X_test[i]])).float()).to(device)
             targets = Variable(torch.from_numpy(np.array([str2vector(ms_tags, sent, False) for sent in y_test[i]])).float()).to(device)
-            hidden = model.initHidden()
+            hidden = model.initHidden(num_layers)
             
 
             outputs, hidden = model(inputs, None, hidden)
@@ -291,7 +293,7 @@ elif sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '':
         for i in range(n_iters):
             inputs = Variable(torch.from_numpy(np.array([str2vector(bow_index, sent, True) for sent in X_test[i]])).float()).to(device)
             targets = Variable(torch.from_numpy(np.array([str2vector(ms_tags, sent, False) for sent in y_test[i]])).float()).to(device)
-            hidden = model.initHidden()
+            hidden = model.initHidden(num_layers)
             # print(targets)
 
             outputs, hidden = model(inputs, None, hidden)
@@ -337,7 +339,7 @@ elif sys.argv[1] == 'roc' and len(sys.argv) > 2 and sys.argv[1] != '':
     for i in range(n_iters):
         inputs = Variable(torch.from_numpy(np.array([str2vector(bow_index, sent, True) for sent in X_test[i]])).float()).to(device)
         targets = Variable(torch.from_numpy(np.array([str2vector(ms_tags, sent, False) for sent in y_test[i]])).float()).to(device)
-        hidden = model.initHidden()
+        hidden = model.initHidden(num_layers)
         
 
         outputs, hidden = model(inputs, None, hidden)
@@ -394,7 +396,7 @@ elif sys.argv[1] == 'test2' and len(sys.argv) > 2 and sys.argv[1] != '':
     for i in range(n_iters):
         inputs = Variable(torch.from_numpy(np.array([str2vector(bow_index, sent, True) for sent in X_test[i]])).float()).to(device)
         targets = Variable(torch.from_numpy(np.array([str2vector(ms_tags, sent, False) for sent in y_test[i]])).float()).to(device)
-        hidden = model.initHidden()
+        hidden = model.initHidden(num_layers)
         
 
         outputs, hidden = model(inputs, None, hidden)
