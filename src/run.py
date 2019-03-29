@@ -50,7 +50,7 @@ train_parser.add_argument("--tune", type=str2bool, nargs='?',const=True, default
 
 # A test command
 test_parser = subparsers.add_parser('test', help='test the model')
-test_parser.add_argument('--models', type=str, nargs=1, help='directory for model files')
+test_parser.add_argument('--models', type=str, nargs=1, help='directory for model files', required=True)
 test_parser.add_argument('--epoch', type=int, default=0, nargs='?', help='specify the epoch to test')
 test_parser.add_argument('--lstm_layers', type=int, default=2, nargs='?', help='number of layers in LSTM')
 test_parser.add_argument('--lstm_hidden', type=int, default=1024, nargs='?', help='hidden size in output MLP')
@@ -58,9 +58,9 @@ test_parser.add_argument('--dim', type=int, default=100, nargs='?', help='dimens
 test_parser.add_argument('--output_result', type=str, default=[''], nargs=1, help='file to store the test case result')
 test_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
 test_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
-test_parser.add_argument('--data_file', type=str, nargs='?', help='data file')
+test_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
 test_parser.add_argument('--output_loss', type=str, nargs='?', help='loss output file')
-test_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=False, help="Bi-LSTM")
+test_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
 test_parser.add_argument('--filters', type=int, default=100, nargs='?', help='number of CNN kernel filters.')
 test_parser.add_argument('--filter_sizes', type=int, default=[3,4,5], nargs='+', help='filter sizes')
 test_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
