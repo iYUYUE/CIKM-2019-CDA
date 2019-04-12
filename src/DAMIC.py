@@ -37,7 +37,7 @@ class DAMIC(nn.Module):
 
         # self.hidden_size = hidden_size
         # self.output_size = output_size
-        # self.bi = bi
+        self.bi = bi
 
         # Embedding
         self.embedding, num_embeddings, embedding_dim = create_emb_layer(weights_matrix)
@@ -61,9 +61,10 @@ class DAMIC(nn.Module):
         
         self.dropout = nn.Dropout(c_dropout)
 
-        self.rnn = nn.LSTM(len(filter_sizes)*n_filters, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = bi, batch_first=True)
+        self.rnn = nn.LSTM(len(filter_sizes)*n_filters, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
         
         if bi:
+            self.rnn_r = nn.LSTM(len(filter_sizes)*n_filters, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
             bi_output_size = hidden_size * 2
         else:
             bi_output_size = hidden_size
@@ -107,8 +108,30 @@ class DAMIC(nn.Module):
         # print(r_in.size())
 
         self.rnn.flatten_parameters()
-        # r_out, (h_n, h_c) = self.rnn(r_in)
-        r_out, _ = self.rnn(r_in)
+        
+        max_len = r_in.size()[1]
+        r_out_vec = []
+
+        for i in range(max_len):
+            if i == 0:
+                r_out_step, (h_n, h_c) = self.rnn(r_in[:, i].unsqueeze(1))
+            else:
+                r_out_step, (h_n, h_c) = self.rnn(r_in[:, i].unsqueeze(1), (h_n, h_c))
+            r_out_vec.append(r_out_step)
+        
+        if self.bi:
+            self.rnn_r.flatten_parameters()
+            for i in range(max_len):
+                i_r = max_len-i-1
+                if i == 0:
+                    r_out_step, (h_n, h_c) = self.rnn_r(r_in[:, i_r].unsqueeze(1))
+                else:
+                    r_out_step, (h_n, h_c) = self.rnn_r(r_in[:, i_r].unsqueeze(1), (h_n, h_c))
+                r_out_vec[i_r] = torch.cat((r_out_vec[i_r], r_out_step), dim=2)
+        
+        r_out = torch.cat(r_out_vec, dim=1)
+        
+        # r_out, _ = self.rnn(r_in)
 
         # r_out, _ = pad_packed_sequence(r_out, batch_first=True, total_length=timesteps)
         

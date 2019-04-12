@@ -719,7 +719,7 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
     f1_scores = f1(y_true=references, y_pred=predictions)
 
     scores = str(acc) + ',' + ','.join([str(x) for x in f1_scores])
-    print('Accuracy, Precision, Recall and F1 score: ', scores)
+    print('Test Accuracy, Precision, Recall and F1 score: ', scores)
     # f1 = f1_score(y_true=references, y_pred=predicts, average='weighted')
     # print('weighted F1 score: ', f1)
     
