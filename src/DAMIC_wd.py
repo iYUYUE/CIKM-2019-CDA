@@ -35,9 +35,16 @@ class DAMIC(nn.Module):
     def __init__(self, hidden_size, output_size, bi, weights_matrix, lstm_layers, n_filters, filter_sizes, c_dropout, l_dropout):
         super(DAMIC, self).__init__()
 
-        # self.hidden_size = hidden_size
-        # self.output_size = output_size
-        # self.bi = bi
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        self.bi = bi
+        self.batch_size = 1
+        vocab_size = weights_matrix.shape[0]
+
+        self.tagset_size = 2
+
+        # self.crf_hidden_size = 256
+        # self.crf_input_size = 1
 
         # Embedding
         self.embedding, num_embeddings, embedding_dim = create_emb_layer(weights_matrix)

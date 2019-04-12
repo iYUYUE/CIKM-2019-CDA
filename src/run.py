@@ -11,6 +11,7 @@ from timeit import default_timer as timer
 from argparse import ArgumentParser
 
 from custom_metrics import hamming_score, f1
+from custom_dataset import DAMICDataset, collate_fn
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -33,7 +34,7 @@ train_parser.add_argument('--epoch', type=int, default=1000, nargs='?', help='nu
 train_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
 train_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
 train_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
-train_parser.add_argument('--patient', type=int, default=10, nargs='?', help='number of epochs to wait if no improvement and then stop the training.')
+train_parser.add_argument('--patient', type=int, default=5, nargs='?', help='number of epochs to wait if no improvement and then stop the training.')
 train_parser.add_argument('--lr', type=float, default=0.001, nargs='?', help='learning rate')
 train_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
 train_parser.add_argument('--filters', type=int, default=100, nargs='?', help='number of CNN kernel filters.')
@@ -97,69 +98,6 @@ max_length = args.max_len
 print()
 print("random seed", seed)
 print("word embedding dimension", dim)
-
-
-class Dataset(data_utils.Dataset):
-    """Custom data.Dataset compatible with data.DataLoader."""
-    def __init__(self, data, targets):
-        """Reads source and target sequences from txt files."""
-        self.src_seqs = data
-        self.trg_seqs = targets
-        self.num_total_seqs = len(targets)
-
-    def __getitem__(self, index):
-        """Returns one data pair (source and target)."""
-        src_seq = self.src_seqs[index]
-        trg_seq = self.trg_seqs[index]
-        return src_seq, trg_seq
-
-    def __len__(self):
-        return self.num_total_seqs
-
-
-def collate_fn(data):
-    """Creates mini-batch tensors from the list of tuples (src_seq, trg_seq).
-    We should build a custom collate_fn rather than using default collate_fn,
-    because merging sequences (including padding) is not supported in default.
-    Seqeuences are padded to the maximum length of mini-batch sequences (dynamic padding).
-    Args:
-        data: list of tuple (src_seq, trg_seq).
-            - src_seq: torch tensor of shape (?); variable length.
-            - trg_seq: torch tensor of shape (?); variable length.
-    Returns:
-        src_seqs: torch tensor of shape (batch_size, padded_length).
-        src_lengths: list of length (batch_size); valid length for each padded source sequence.
-        trg_seqs: torch tensor of shape (batch_size, padded_length).
-        trg_lengths: list of length (batch_size); valid length for each padded target sequence.
-    """
-    def merge(sequences):
-        sequences = list(sequences)
-        lengths = [len(seq) for seq in sequences]
-        u_len = len(sequences[0][0])
-        for row in sequences:
-            diff = max(lengths) - len(row)
-            for i in range(diff):
-                row.append([0]*u_len)
-        return np.array(sequences), np.array(lengths)
-
-    # sort a list by sequence length (descending order) to use pack_padded_sequence
-    data.sort(key=lambda x: len(x[0]), reverse=True)
-
-    # seperate source and target sequences
-    src_seqs, trg_seqs = zip(*data)
-
-    # merge sequences (from tuple of 1D tensor to 2D tensor)
-    src_seqs, src_lengths = merge(src_seqs)
-    trg_seqs, trg_lengths = merge(trg_seqs)
-
-    src_seqs = torch.from_numpy(src_seqs).long()
-    trg_seqs = torch.from_numpy(trg_seqs).float()
-    src_lengths = torch.from_numpy(src_lengths).long()
-    trg_lengths = torch.from_numpy(trg_lengths).long()
-
-    # print(src_seqs.size())
-
-    return src_seqs, src_lengths, trg_seqs, trg_lengths
 
 def best_score_search(true_labels, predictions, f):
 # https://discuss.pytorch.org/t/multilabel-classification-how-to-binarize-scores-how-to-learn-thresholds/25396
@@ -512,7 +450,7 @@ train_n_iters = len(X_train)
 train_data = [ [str2vector(word_to_ix, sent, True) for sent in X_train[i]] for i in range(train_n_iters)]
 train_target = [ [str2vector(ms_tags, sent, False) for sent in y_train[i]] for i in range(train_n_iters)]
 
-train_loader = Dataset(train_data, train_target)
+train_loader = DAMICDataset(train_data, train_target)
 
 
 val_n_iters = len(X_val)
@@ -520,7 +458,7 @@ val_n_iters = len(X_val)
 val_data = [ [str2vector(word_to_ix, sent, True) for sent in X_val[i]] for i in range(val_n_iters)]
 val_target = [ [str2vector(ms_tags, sent, False) for sent in y_val[i]] for i in range(val_n_iters)]
 
-val_loader = Dataset(val_data, val_target)
+val_loader = DAMICDataset(val_data, val_target)
 
 
 test_n_iters = len(X_test)
@@ -528,7 +466,7 @@ test_n_iters = len(X_test)
 test_data = [ [str2vector(word_to_ix, sent, True) for sent in X_test[i]] for i in range(test_n_iters)]
 test_target = [ [str2vector(ms_tags, sent, False) for sent in y_test[i]] for i in range(test_n_iters)]
 
-test_loader = Dataset(test_data, test_target)
+test_loader = DAMICDataset(test_data, test_target)
 
 if sys.argv[1] == 'train':
 
