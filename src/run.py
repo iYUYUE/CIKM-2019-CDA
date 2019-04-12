@@ -11,7 +11,7 @@ from timeit import default_timer as timer
 from argparse import ArgumentParser
 
 from custom_metrics import hamming_score, f1
-from custom_dataset import DAMICDataset, collate_fn
+from custom_dataset import batch_maker, flattern_result
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -45,7 +45,7 @@ train_parser.add_argument('--ld', type=float, default=0.05, nargs='?', help='LST
 train_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='max length of utterance')
 train_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
 train_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
-train_parser.add_argument('--batch_size', type=int, default=10, nargs='?', help='batch size')
+train_parser.add_argument('--batch_size', type=int, default=12, nargs='?', help='batch size')
 train_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
 train_parser.add_argument("--tune", type=str2bool, nargs='?',const=True, default=False, help="tunning mode")
 
@@ -71,7 +71,7 @@ test_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='ma
 test_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
 test_parser.add_argument('--discount', type=float, default=1, nargs='?', help='test discount')
 test_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
-test_parser.add_argument('--batch_size', type=int, default=10, nargs='?', help='batch size')
+test_parser.add_argument('--batch_size', type=int, default=12, nargs='?', help='batch size')
 test_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
 
 dataset_parser = subparsers.add_parser('dataset', help='save the dataset files')
@@ -152,25 +152,7 @@ def ret_index (li, s):
     else:
         # print(s)
         return -1
-# def pad(data, max_d, max_u):
-#     # dialog_lengths = [len(dialog) for dialog in data]    
-#     # print(dialog_lengths)
-#     for row in data:
-#         diff = max_d - len(row)
-#         for i in range(diff):
-#             row.append([0] * max_u)
-#     return np.array(data)
 
-def unpad(data, lengths):
-    ret = None
-    for i, l in enumerate(lengths):
-        if ret is None:
-            ret = data[i][0:l]
-        else:
-            ret = np.append(ret, data[i][0:l], axis=0)
-    # print(len(ret))
-    # print(sum(lengths))
-    return ret
 def str2vector (li, str, text):
     if text:
         max_len = max_utterance_lengths 
@@ -244,8 +226,6 @@ def vector2tags (l, ms_tags):
             ret = ret + ' ' + ms_tags[i]
     return ret
 
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 tuning = False
 # read in curpus
 ms_tags = ['CQ', 'FD', 'FQ', 'GG', 'IR', 'JK', 'NF', 'O', 'OQ', 'PA', 'PF', 'RQ']
@@ -301,48 +281,6 @@ dialog_lengths = [len(dialog) for dialog in all_dialogs]
 X_train, X_val, y_train, y_val = train_test_split(all_dialogs, all_tags, test_size=0.1, random_state=seed)
 
 X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.1, random_state=seed)
-
-# outf = open('train.tsv', 'w')
-# out = ''
-
-# for i in range(len(y_train)):
-#     for j in range(len(y_train[i])):
-#         out += '_'.join(y_train[i][j].split())
-#         out += '\t'
-#         out += X_train[i][j]
-#         out += ' __eou__\n'
-#     out += '\n'
-
-# outf.write(out)
-
-# outf = open('valid.tsv', 'w')
-# out = ''
-
-# for i in range(len(y_val)):
-#     for j in range(len(y_val[i])):
-#         out += '_'.join(y_val[i][j].split())
-#         out += '\t'
-#         out += X_val[i][j]
-#         out += ' __eou__\n'
-#     out += '\n'
-
-# outf.write(out)
-
-# outf = open('test.tsv', 'w')
-# out = ''
-
-# for i in range(len(y_test)):
-#     for j in range(len(y_test[i])):
-#         out += '_'.join(y_test[i][j].split())
-#         out += '\t'
-#         out += X_test[i][j]
-#         out += ' __eou__\n'
-#     out += '\n'
-
-# outf.write(out)
-# exit()
-# X_test = X_val
-# y_test = y_val
 
 if args.da_filter:
     print("[uncommon DAs filted]")
@@ -417,6 +355,7 @@ glove = {w: vectors[word2idx[w]] for w in words}
 
 # print(glove['The'])
 # print(glove['.com'])
+
 # with padding vector
 matrix_len = len(target_vocab) + 1
 weights_matrix = np.zeros((matrix_len, dim))
@@ -450,7 +389,7 @@ train_n_iters = len(X_train)
 train_data = [ [str2vector(word_to_ix, sent, True) for sent in X_train[i]] for i in range(train_n_iters)]
 train_target = [ [str2vector(ms_tags, sent, False) for sent in y_train[i]] for i in range(train_n_iters)]
 
-train_loader = DAMICDataset(train_data, train_target)
+# train_loader = DAMICDataset(train_data, train_target)
 
 
 val_n_iters = len(X_val)
@@ -458,7 +397,7 @@ val_n_iters = len(X_val)
 val_data = [ [str2vector(word_to_ix, sent, True) for sent in X_val[i]] for i in range(val_n_iters)]
 val_target = [ [str2vector(ms_tags, sent, False) for sent in y_val[i]] for i in range(val_n_iters)]
 
-val_loader = DAMICDataset(val_data, val_target)
+# val_loader = DAMICDataset(val_data, val_target)
 
 
 test_n_iters = len(X_test)
@@ -466,7 +405,7 @@ test_n_iters = len(X_test)
 test_data = [ [str2vector(word_to_ix, sent, True) for sent in X_test[i]] for i in range(test_n_iters)]
 test_target = [ [str2vector(ms_tags, sent, False) for sent in y_test[i]] for i in range(test_n_iters)]
 
-test_loader = DAMICDataset(test_data, test_target)
+# test_loader = DAMICDataset(test_data, test_target)
 
 if sys.argv[1] == 'train':
 
@@ -526,15 +465,8 @@ if sys.argv[1] == 'train':
     stop_counter = 0
     best_score = None
 
-    train_loader_dataset = data_utils.DataLoader(dataset=train_loader,
-                                              batch_size=batch_size,
-                                              shuffle=False,
-                                              collate_fn=collate_fn)
-    val_loader_dataset = data_utils.DataLoader(dataset=val_loader,
-                                              batch_size=batch_size,
-                                              shuffle=False,
-                                              collate_fn=collate_fn)
-    
+    train_loader_dataset = batch_maker(train_data, train_target, batch_size)
+    val_loader_dataset = batch_maker(val_data, val_target, batch_size)
     # learning
     for epoch in range(n_epochs):
         ###################
@@ -542,12 +474,12 @@ if sys.argv[1] == 'train':
         ###################
         model.train() # prep model for training
 
-        for i, data in enumerate(train_loader_dataset, 0):
-            src_seqs, src_lengths, trg_seqs, trg_lengths = data
+        for data in train_loader_dataset:
+            src_seqs, trg_seqs = data
             # inputs, targets = Variable(inputs.to(device)), Variable(targets.to(device))
-            src_seqs, src_lengths, trg_seqs = src_seqs.to(device), src_lengths.to(device), trg_seqs.to(device)
+            src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-            outputs = model(src_seqs, src_lengths)
+            outputs = model(src_seqs)
 
             # print(outputs)
             outputs = outputs.to(device)
@@ -567,10 +499,10 @@ if sys.argv[1] == 'train':
         model.eval() # prep model for evaluation
 
         for i, data in enumerate(val_loader_dataset, 0):
-            src_seqs, src_lengths, trg_seqs, trg_lengths = data    
-            src_seqs, src_lengths, trg_seqs = src_seqs.to(device), src_lengths.to(device), trg_seqs.to(device)
+            src_seqs, trg_seqs = data    
+            src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-            outputs = model(src_seqs, src_lengths)
+            outputs = model(src_seqs)
 
             # print(outputs)
             outputs = outputs.to(device)
@@ -669,26 +601,16 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
         model.load_state_dict(torch.load(directory+filename))
         model.eval()
 
-        train_loader_dataset = data_utils.DataLoader(dataset=train_loader,
-                                              batch_size=batch_size,
-                                              shuffle=False,
-                                              collate_fn=collate_fn)
-        val_loader_dataset = data_utils.DataLoader(dataset=val_loader,
-                                              batch_size=batch_size,
-                                              shuffle=False,
-                                              collate_fn=collate_fn)
-        test_loader_dataset = data_utils.DataLoader(dataset=test_loader,
-                                              batch_size=batch_size,
-                                              shuffle=False,
-                                              collate_fn=collate_fn)
+        train_loader_dataset = batch_maker(train_data, train_target, batch_size)
+        val_loader_dataset = batch_maker(val_data, val_target, batch_size)
+        test_loader_dataset = batch_maker(test_data, test_target, batch_size)
 
         loss = 0.0 # For plotting
-        for i, data in enumerate(train_loader_dataset, 0):
-            src_seqs, src_lengths, trg_seqs, trg_lengths = data
-            # inputs, targets = Variable(inputs.to(device)), Variable(targets.to(device))
-            src_seqs, src_lengths, trg_seqs = src_seqs.to(device), src_lengths.to(device), trg_seqs.to(device)
+        for data in train_loader_dataset:
+            src_seqs, trg_seqs = data
+            src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-            outputs = model(src_seqs, src_lengths)
+            outputs = model(src_seqs)
 
             # print(outputs)
             outputs = outputs.to(device)
@@ -704,27 +626,26 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
         loss = 0.0
         references = None
         predicts = None
-        for i, data in enumerate(val_loader_dataset, 0):
-            src_seqs, src_lengths, trg_seqs, trg_lengths = data    
-            src_seqs, src_lengths, trg_seqs = src_seqs.to(device), src_lengths.to(device), trg_seqs.to(device)
+        for data in val_loader_dataset:
+            src_seqs, trg_seqs = data    
+            src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-            outputs = model(src_seqs, src_lengths)
+            outputs = model(src_seqs)
 
             # print(outputs)
             outputs = outputs.to(device)
             loss += criterion(outputs, trg_seqs).item()
 
-            reference = trg_seqs.cpu().numpy()
-            predict = torch.squeeze(outputs).detach().cpu().numpy()
-
-            # print(predict)
+            reference = flattern_result(trg_seqs.cpu().numpy())
+            predict = flattern_result(outputs.detach().cpu().numpy())
 
             if references is None or predicts is None:
-                references = unpad(reference, trg_lengths)
-                predicts = unpad(predict, trg_lengths)
+                references = reference
+                predicts = predict
             else:
-                references = np.append(references, unpad(reference, trg_lengths), axis=0)
-                predicts = np.append(predicts, unpad(predict, trg_lengths), axis=0)
+                # print(predicts, predict)
+                references = np.append(references, reference, axis=0)
+                predicts = np.append(predicts, predict, axis=0)
 
         # print(references)
 
@@ -754,25 +675,25 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
     references = None
     predicts = None
 
-    for i, data in enumerate(test_loader_dataset, 0):
-        src_seqs, src_lengths, trg_seqs, trg_lengths = data    
-        src_seqs, src_lengths, trg_seqs = src_seqs.to(device), src_lengths.to(device), trg_seqs.to(device)
+    for data in test_loader_dataset:
+        src_seqs, trg_seqs = data    
+        src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-        outputs = model(src_seqs, src_lengths)
+        outputs = model(src_seqs)
 
         # print(outputs)
         outputs = outputs.to(device)
         loss += criterion(outputs, trg_seqs).item()
 
-        reference = trg_seqs.cpu().numpy()
-        predict = torch.squeeze(outputs).detach().cpu().numpy()
+        reference = flattern_result(trg_seqs.cpu().numpy())
+        predict = flattern_result(outputs.detach().cpu().numpy())
 
         if references is None or predicts is None:
-            references = unpad(reference, trg_lengths)
-            predicts = unpad(predict, trg_lengths)
+            references = reference
+            predicts = predict
         else:
-            references = np.append(references, unpad(reference, trg_lengths), axis=0)
-            predicts = np.append(predicts, unpad(predict, trg_lengths), axis=0)
+            references = np.append(references, reference, axis=0)
+            predicts = np.append(predicts, predict, axis=0)
             # print('p', p)
             # print('r', r)
             # if result_file != '':

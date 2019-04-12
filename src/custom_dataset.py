@@ -1,7 +1,9 @@
 import numpy as np
 import torch
 from torch.utils import data as data_utils
+from itertools import chain
 
+# deprecated!
 class DAMICDataset(data_utils.Dataset):
     """Custom data.Dataset compatible with data.DataLoader."""
     def __init__(self, data, targets):
@@ -19,7 +21,7 @@ class DAMICDataset(data_utils.Dataset):
     def __len__(self):
         return self.num_total_seqs
 
-
+# deprecated!
 def collate_fn(data):
     """Creates mini-batch tensors from the list of tuples (src_seq, trg_seq).
     We should build a custom collate_fn rather than using default collate_fn,
@@ -63,3 +65,46 @@ def collate_fn(data):
     # print(src_seqs.size())
 
     return src_seqs, src_lengths, trg_seqs, trg_lengths
+
+# def pad(data, max_d, max_u):
+#     # dialog_lengths = [len(dialog) for dialog in data]    
+#     # print(dialog_lengths)
+#     for row in data:
+#         diff = max_d - len(row)
+#         for i in range(diff):
+#             row.append([0] * max_u)
+#     return np.array(data)
+
+# deprecated!
+def unpad(data, lengths):
+    ret = None
+    for i, l in enumerate(lengths):
+        if ret is None:
+            ret = data[i][0:l]
+        else:
+            ret = np.append(ret, data[i][0:l], axis=0)
+    # print(len(ret))
+    # print(sum(lengths))
+    return ret
+
+def batch_maker(data, targets, batch_size, shuffle=True):
+    sequences = list(zip(data, targets))
+    sequences.sort(key=lambda x: len(x[0]), reverse=True)
+    # return mini-batched data and targets
+    ret = list(chunks(sequences, batch_size))
+    if shuffle:
+        np.random.shuffle(ret)
+    return ret 
+def chunks(l, n):
+    head = 0
+    for i in range(0, len(l)):
+        if i == len(l) -1 or len(l[i][0]) != len(l[i+1][0]) or i - head == n - 1:
+            src_seqs = np.array(list(list(zip(*l[head:i + 1]))[0]))
+            trg_seqs = np.array(list(list(zip(*l[head:i + 1]))[1]))
+            src_seqs = torch.from_numpy(src_seqs).long()
+            trg_seqs = torch.from_numpy(trg_seqs).float()
+            yield (src_seqs, trg_seqs)
+            head = i + 1
+
+def flattern_result(list_of_lists):
+    return list(chain.from_iterable(list_of_lists))

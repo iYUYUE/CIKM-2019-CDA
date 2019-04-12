@@ -73,7 +73,7 @@ class DAMIC(nn.Module):
           nn.Sigmoid(),
         )
 
-    def forward(self, dialogue, lengths):
+    def forward(self, dialogue):
         # print(dialogue.size())
 
         batch_size, timesteps, sent_len = dialogue.size()
@@ -102,7 +102,7 @@ class DAMIC(nn.Module):
 
         r_in = c_out.view(batch_size, timesteps, -1)
 
-        r_in = pack_padded_sequence(r_in, lengths, batch_first=True)  # pack batch
+        # r_in = pack_padded_sequence(r_in, lengths, batch_first=True)  # pack batch
 
         # print(r_in.size())
 
@@ -110,7 +110,7 @@ class DAMIC(nn.Module):
         # r_out, (h_n, h_c) = self.rnn(r_in)
         r_out, _ = self.rnn(r_in)
 
-        r_out, _ = pad_packed_sequence(r_out, batch_first=True, total_length=timesteps)
+        # r_out, _ = pad_packed_sequence(r_out, batch_first=True, total_length=timesteps)
         
         r_out2 = self.h2o(r_out)
 
