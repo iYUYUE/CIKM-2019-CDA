@@ -32,12 +32,13 @@ def create_emb_layer(weights_matrix, non_trainable=False):
     return emb_layer, num_embeddings, embedding_dim
 
 class DAMIC(nn.Module):
-    def __init__(self, hidden_size, output_size, bi, weights_matrix, lstm_layers, n_filters, filter_sizes, c_dropout, l_dropout):
+    def __init__(self, hidden_size, output_size, bi, weights_matrix, lstm_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio = None):
         super(DAMIC, self).__init__()
 
         # self.hidden_size = hidden_size
-        # self.output_size = output_size
+        self.output_size = output_size
         self.bi = bi
+        self.teacher_forcing_ratio = teacher_forcing_ratio
 
         # Embedding
         self.embedding, num_embeddings, embedding_dim = create_emb_layer(weights_matrix)
@@ -61,20 +62,25 @@ class DAMIC(nn.Module):
         
         self.dropout = nn.Dropout(c_dropout)
 
-        self.rnn = nn.LSTM(len(filter_sizes)*n_filters, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
+        input_size = len(filter_sizes)*n_filters
+
+        self.rnn = nn.LSTM(input_size, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
         
         if bi:
-            self.rnn_r = nn.LSTM(len(filter_sizes)*n_filters, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
+            if self.teacher_forcing_ratio is not None:
+                input_size += output_size
+            self.rnn_r = nn.LSTM(input_size, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
             bi_output_size = hidden_size * 2
         else:
             bi_output_size = hidden_size
 
         self.h2o = nn.Sequential(
-          nn.Linear(bi_output_size, output_size),
-          nn.Sigmoid(),
+            # nn.Dropout(c_dropout),
+            nn.Linear(bi_output_size, output_size),
+            nn.Sigmoid(),
         )
 
-    def forward(self, dialogue):
+    def forward(self, dialogue, targets = None):
         # print(dialogue.size())
 
         batch_size, timesteps, sent_len = dialogue.size()
@@ -103,38 +109,48 @@ class DAMIC(nn.Module):
 
         r_in = c_out.view(batch_size, timesteps, -1)
 
-        # r_in = pack_padded_sequence(r_in, lengths, batch_first=True)  # pack batch
-
-        # print(r_in.size())
 
         self.rnn.flatten_parameters()
         
         max_len = r_in.size()[1]
-        r_out_vec = []
+        r_out_vec = [None] * max_len
+        predict_vec = [None] * max_len
 
         for i in range(max_len):
             if i == 0:
                 r_out_step, (h_n, h_c) = self.rnn(r_in[:, i].unsqueeze(1))
             else:
                 r_out_step, (h_n, h_c) = self.rnn(r_in[:, i].unsqueeze(1), (h_n, h_c))
-            r_out_vec.append(r_out_step)
+            r_out_vec[i] = r_out_step
+            if not self.bi:
+                predict_vec[i] = self.h2o(r_out_step)
         
         if self.bi:
             self.rnn_r.flatten_parameters()
             for i in range(max_len):
                 i_r = max_len-i-1
+                
+                rnn_input = r_in[:, i_r].unsqueeze(1)
+
+                if self.teacher_forcing_ratio is not None:
+                    if i == 0:
+                        rnn_input = torch.cat([torch.empty(batch_size, 1, self.output_size, dtype=torch.float).fill_(.0).to(device), rnn_input], dim=2)
+                    elif random.random() < self.teacher_forcing_ratio and targets is not None:
+                        # Teacher Forcing
+                        rnn_input = torch.cat([targets[:, i_r+1].unsqueeze(1), rnn_input], dim=2)
+                    else:
+                        rnn_input = torch.cat([predict_vec[i_r+1], rnn_input], dim=2)
+                
                 if i == 0:
-                    r_out_step, (h_n, h_c) = self.rnn_r(r_in[:, i_r].unsqueeze(1))
+                    r_out_step, (h_n, h_c) = self.rnn_r(rnn_input)
                 else:
-                    r_out_step, (h_n, h_c) = self.rnn_r(r_in[:, i_r].unsqueeze(1), (h_n, h_c))
-                r_out_vec[i_r] = torch.cat((r_out_vec[i_r], r_out_step), dim=2)
+                    r_out_step, (h_n, h_c) = self.rnn_r(rnn_input, (h_n, h_c))
+                
+                r_out = torch.cat((r_out_vec[i_r], r_out_step), dim=2)
+                predict_vec[i_r] = self.h2o(r_out)
+                # print(i, i_r)
+                
         
-        r_out = torch.cat(r_out_vec, dim=1)
+        predicts = torch.cat(predict_vec, dim=1)
         
-        # r_out, _ = self.rnn(r_in)
-
-        # r_out, _ = pad_packed_sequence(r_out, batch_first=True, total_length=timesteps)
-        
-        r_out2 = self.h2o(r_out)
-
-        return r_out2
+        return predicts

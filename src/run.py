@@ -42,6 +42,7 @@ train_parser.add_argument('--filter_sizes', type=int, default=[3,4,5], nargs='+'
 train_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
 train_parser.add_argument('--cd', type=float, default=0.5, nargs='?', help='CNN dropout')
 train_parser.add_argument('--ld', type=float, default=0.05, nargs='?', help='LSTM dropout')
+train_parser.add_argument('--tf', type=float, default=None, nargs='?', help='Teacher Forcing rate')
 train_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='max length of utterance')
 train_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
 train_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
@@ -67,6 +68,7 @@ test_parser.add_argument('--filter_sizes', type=int, default=[3,4,5], nargs='+',
 test_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
 test_parser.add_argument('--cd', type=float, default=0.5, nargs='?', help='CNN dropout')
 test_parser.add_argument('--ld', type=float, default=0.05, nargs='?', help='LSTM dropout')
+test_parser.add_argument('--tf', type=float, default=None, nargs='?', help='Teacher Forcing rate')
 test_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='max length of utterance')
 test_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
 test_parser.add_argument('--discount', type=float, default=1, nargs='?', help='test discount')
@@ -423,6 +425,7 @@ if sys.argv[1] == 'train':
     c_dropout = args.cd
     l_dropout = args.ld
     batch_size = args.batch_size
+    teacher_forcing_ratio = args.tf
 
     tuning = args.tune
 
@@ -442,13 +445,14 @@ if sys.argv[1] == 'train':
         print('batch_size', batch_size)
         print('CNN dropout', c_dropout)
         print('LSTM dropout', l_dropout)
+        print('Teacher Forcing rate', teacher_forcing_ratio)
         print()
         print('model will be saved to', save_path)
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
     # torch.backends.cudnn.enabled = False
-    model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout)
+    model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio)
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -479,7 +483,7 @@ if sys.argv[1] == 'train':
             # inputs, targets = Variable(inputs.to(device)), Variable(targets.to(device))
             src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-            outputs = model(src_seqs)
+            outputs = model(src_seqs, trg_seqs)
 
             # print(outputs)
             outputs = outputs.to(device)
@@ -502,7 +506,7 @@ if sys.argv[1] == 'train':
             src_seqs, trg_seqs = data    
             src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-            outputs = model(src_seqs)
+            outputs = model(src_seqs, trg_seqs)
 
             # print(outputs)
             outputs = outputs.to(device)
@@ -510,10 +514,7 @@ if sys.argv[1] == 'train':
         if not tuning:
             print('epoch', epoch+1, ' average val loss: ', vlosses[epoch] / len(val_loader_dataset))
 
-        if best_score is None:
-            best_score = vlosses[epoch]
-            torch.save(model.state_dict(), save_path+str(best_epoch))
-        elif vlosses[epoch] < best_score:
+        if best_score is None or vlosses[epoch] < best_score:
             best_score = vlosses[epoch]
             best_epoch = epoch+1
             torch.save(model.state_dict(), save_path+str(best_epoch))
@@ -557,6 +558,10 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
         l_dropout = args.ld
         test_discount = args.discount
         batch_size = args.batch_size
+        teacher_forcing_ratio = args.tf
+        if teacher_forcing_ratio is not None:
+            teacher_forcing_ratio = .0
+
     if not tuning:
         print('lstm_hidden_size', hidden_size)
         print('lstm_layers', num_layers)
@@ -567,6 +572,7 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
         print('CNN dropout', c_dropout)
         print('LSTM dropout', l_dropout)
         print('test discount', test_discount)
+        print('Teacher Forcing rate', teacher_forcing_ratio)
 
     if result_file and result_file != '':
         outf = open(result_file, 'w')
@@ -580,7 +586,7 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
     bpredicts = []
     bfile = ''
 
-    model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout)
+    model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio)
     model = model.to(device)
 
     if torch.cuda.device_count() > 1:
@@ -610,7 +616,7 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
             src_seqs, trg_seqs = data
             src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-            outputs = model(src_seqs)
+            outputs = model(src_seqs, trg_seqs)
 
             # print(outputs)
             outputs = outputs.to(device)
@@ -630,7 +636,7 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
             src_seqs, trg_seqs = data    
             src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-            outputs = model(src_seqs)
+            outputs = model(src_seqs, trg_seqs)
 
             # print(outputs)
             outputs = outputs.to(device)
@@ -679,7 +685,7 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
         src_seqs, trg_seqs = data    
         src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
-        outputs = model(src_seqs)
+        outputs = model(src_seqs, trg_seqs)
 
         # print(outputs)
         outputs = outputs.to(device)
