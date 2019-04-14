@@ -17,9 +17,11 @@ Dialogue Act Modelling in Information-seeking Conversations
 - Use *markov_chain.py* to produce Markov chain from original *MSDialog-Intent.json* file
 
 ## Baseline Model
-- Train: python src/baseline.py train
-- Test: python src/baseline.py test
+python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --tune True --baseline True
 
 ## DAMIC Model
 - Train: python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog
 - Test: python src/run.py test
+
+## DAMIC Wide-and-Deep Model
+python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --tune True --tf 0.5 --lstm_hidden 128 --batch_size 24 --wd True

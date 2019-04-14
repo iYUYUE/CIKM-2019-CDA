@@ -75,9 +75,17 @@ class DAMIC(nn.Module):
         self.rnn_r = nn.LSTM(input_size, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
 
         self.h2o = nn.Sequential(
-            # nn.Dropout(c_dropout),
             nn.Linear(bi_output_size, output_size),
             nn.Sigmoid(),
+            # # MLP
+            # nn.Linear(bi_output_size, hidden_size),
+            # nn.ReLU(),
+            # nn.Dropout(0.2),
+            # nn.Linear(hidden_size, hidden_size),
+            # nn.ReLU(),
+            # nn.Dropout(0.2),
+            # nn.Linear(hidden_size, output_size),
+            # nn.Sigmoid(),
         )
 
     def forward(self, dialogue, targets = None):

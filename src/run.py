@@ -49,8 +49,10 @@ train_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default
 train_parser.add_argument('--batch_size', type=int, default=12, nargs='?', help='batch size')
 train_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
 train_parser.add_argument("--tune", type=str2bool, nargs='?',const=True, default=False, help="tunning mode")
+train_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
+train_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
 
-# A test command
+ # A test command
 test_parser = subparsers.add_parser('test', help='test the model')
 test_parser.add_argument('--models', type=str, nargs=1, help='directory for model files', required=True)
 test_parser.add_argument('--epoch', type=int, default=0, nargs='?', help='specify the epoch to test')
@@ -75,6 +77,8 @@ test_parser.add_argument('--discount', type=float, default=1, nargs='?', help='t
 test_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
 test_parser.add_argument('--batch_size', type=int, default=12, nargs='?', help='batch size')
 test_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
+test_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
+test_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
 
 dataset_parser = subparsers.add_parser('dataset', help='save the dataset files')
 
@@ -90,7 +94,14 @@ from torch.autograd import Variable
 from torch import optim
 from torch.utils import data as data_utils
 
-from DAMIC import DAMIC
+if args.baseline:
+    from baseline import DAMIC
+elif args.wd:
+    assert args.tf is not None
+    from DAMIC_wd import DAMIC
+else:
+    from DAMIC import DAMIC
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
