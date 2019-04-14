@@ -64,15 +64,15 @@ class DAMIC(nn.Module):
 
         input_size = len(filter_sizes)*n_filters
 
-        self.rnn = nn.LSTM(input_size, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
-        
         if bi:
-            if self.teacher_forcing_ratio is not None:
-                input_size += output_size
-            self.rnn_r = nn.LSTM(input_size, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
+            self.rnn = nn.LSTM(input_size, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
             bi_output_size = hidden_size * 2
         else:
             bi_output_size = hidden_size
+
+        if self.teacher_forcing_ratio is not None:
+            input_size += output_size
+        self.rnn_r = nn.LSTM(input_size, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
 
         self.h2o = nn.Sequential(
             # nn.Dropout(c_dropout),
@@ -108,48 +108,47 @@ class DAMIC(nn.Module):
         #c_out = [batch size * timesteps, n_filters * len(filter_sizes)]
 
         r_in = c_out.view(batch_size, timesteps, -1)
-
-
-        self.rnn.flatten_parameters()
         
         max_len = r_in.size()[1]
         r_out_vec = [None] * max_len
         predict_vec = [None] * max_len
 
-        for i in range(max_len):
-            if i == 0:
-                r_out_step, (h_n, h_c) = self.rnn(r_in[:, i].unsqueeze(1))
-            else:
-                r_out_step, (h_n, h_c) = self.rnn(r_in[:, i].unsqueeze(1), (h_n, h_c))
-            r_out_vec[i] = r_out_step
-            if not self.bi:
-                predict_vec[i] = self.h2o(r_out_step)
-        
         if self.bi:
-            self.rnn_r.flatten_parameters()
+            self.rnn.flatten_parameters()
             for i in range(max_len):
                 i_r = max_len-i-1
-                
-                rnn_input = r_in[:, i_r].unsqueeze(1)
-
-                if self.teacher_forcing_ratio is not None:
-                    if i == 0:
-                        rnn_input = torch.cat([torch.empty(batch_size, 1, self.output_size, dtype=torch.float).fill_(.0).to(device), rnn_input], dim=2)
-                    elif random.random() < self.teacher_forcing_ratio and targets is not None:
-                        # Teacher Forcing
-                        rnn_input = torch.cat([targets[:, i_r+1].unsqueeze(1), rnn_input], dim=2)
-                    else:
-                        rnn_input = torch.cat([predict_vec[i_r+1], rnn_input], dim=2)
+                if i == 0:
+                    r_out_step, (h_n, h_c) = self.rnn(r_in[:, i_r].unsqueeze(1))
+                else:
+                    r_out_step, (h_n, h_c) = self.rnn(r_in[:, i_r].unsqueeze(1), (h_n, h_c))
+                r_out_vec[i_r] = r_out_step
+        
+        self.rnn_r.flatten_parameters()
+        for i in range(max_len):            
+            # context input
+            rnn_input = r_in[:, i].unsqueeze(1)
+            
+            # Scheduled Sampling
+            if self.teacher_forcing_ratio is not None:
                 
                 if i == 0:
-                    r_out_step, (h_n, h_c) = self.rnn_r(rnn_input)
+                    rnn_input = torch.cat([torch.empty(batch_size, 1, self.output_size, dtype=torch.float).fill_(.0).to(device), rnn_input], dim=2)
+                elif self.teacher_forcing_ratio > 0 and random.random() < self.teacher_forcing_ratio:
+                    # Teacher Forcing
+                    assert targets is not None
+                    rnn_input = torch.cat([targets[:, i-1].unsqueeze(1), rnn_input], dim=2)
                 else:
-                    r_out_step, (h_n, h_c) = self.rnn_r(rnn_input, (h_n, h_c))
-                
-                r_out = torch.cat((r_out_vec[i_r], r_out_step), dim=2)
-                predict_vec[i_r] = self.h2o(r_out)
-                # print(i, i_r)
-                
+                    rnn_input = torch.cat([predict_vec[i-1], rnn_input], dim=2)
+            
+            if i == 0:
+                r_out_step, (h_n, h_c) = self.rnn_r(rnn_input)
+            else:
+                r_out_step, (h_n, h_c) = self.rnn_r(rnn_input, (h_n, h_c))
+            
+            if self.bi:
+                r_out_step = torch.cat((r_out_vec[i], r_out_step), dim=2)
+            
+            predict_vec[i] = self.h2o(r_out_step)                
         
         predicts = torch.cat(predict_vec, dim=1)
         

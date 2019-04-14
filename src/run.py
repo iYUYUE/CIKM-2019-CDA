@@ -447,7 +447,7 @@ if sys.argv[1] == 'train':
         print('LSTM dropout', l_dropout)
         print('Teacher Forcing rate', teacher_forcing_ratio)
         print()
-        print('model will be saved to', save_path)
+    print('model will be saved to', save_path)
     if not os.path.exists(save_path):
         os.makedirs(save_path)
 
