@@ -1,7 +1,7 @@
 import bcolz
 import pickle
 import numpy as np
-import math, random, string, os, sys
+import math, random, string, os, sys, io
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from scipy.optimize import fmin_l_bfgs_b, basinhopping
@@ -13,6 +13,9 @@ from argparse import ArgumentParser
 from custom_metrics import hamming_score, f1
 from custom_dataset import batch_maker, flattern_result
 
+from hyperopt import fmin, tpe, hp, space_eval, STATUS_OK, STATUS_FAIL
+from hyperopt.pyll.base import scope
+
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
         return True
@@ -20,97 +23,6 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
-
-parser = ArgumentParser()
-
-subparsers = parser.add_subparsers(help='commands')
-
-# A train command
-train_parser = subparsers.add_parser('train', help='train the model')
-train_parser.add_argument('--lstm_layers', type=int, default=2, nargs='?', help='number of layers in LSTM')
-train_parser.add_argument('--lstm_hidden', type=int, default=1024, nargs='?', help='hidden size in output MLP')
-train_parser.add_argument('--dim', type=int, default=100, nargs='?', help='dimension of word embeddings')
-train_parser.add_argument('--epoch', type=int, default=1000, nargs='?', help='number of epochs to run')
-train_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
-train_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
-train_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
-train_parser.add_argument('--patient', type=int, default=5, nargs='?', help='number of epochs to wait if no improvement and then stop the training.')
-train_parser.add_argument('--lr', type=float, default=0.001, nargs='?', help='learning rate')
-train_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
-train_parser.add_argument('--filters', type=int, default=100, nargs='?', help='number of CNN kernel filters.')
-train_parser.add_argument('--filter_sizes', type=int, default=[3,4,5], nargs='+', help='filter sizes')
-train_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
-train_parser.add_argument('--cd', type=float, default=0.5, nargs='?', help='CNN dropout')
-train_parser.add_argument('--ld', type=float, default=0.05, nargs='?', help='LSTM dropout')
-train_parser.add_argument('--tf', type=float, default=None, nargs='?', help='Teacher Forcing rate')
-train_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='max length of utterance')
-train_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
-train_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
-train_parser.add_argument('--batch_size', type=int, default=12, nargs='?', help='batch size')
-train_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
-train_parser.add_argument("--tune", type=str2bool, nargs='?',const=True, default=False, help="tunning mode")
-train_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
-train_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
-
- # A test command
-test_parser = subparsers.add_parser('test', help='test the model')
-test_parser.add_argument('--models', type=str, nargs=1, help='directory for model files', required=True)
-test_parser.add_argument('--epoch', type=int, default=0, nargs='?', help='specify the epoch to test')
-test_parser.add_argument('--lstm_layers', type=int, default=2, nargs='?', help='number of layers in LSTM')
-test_parser.add_argument('--lstm_hidden', type=int, default=1024, nargs='?', help='hidden size in output MLP')
-test_parser.add_argument('--dim', type=int, default=100, nargs='?', help='dimension of word embeddings')
-test_parser.add_argument('--output_result', type=str, default=[''], nargs=1, help='file to store the test case result')
-test_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
-test_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
-test_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
-test_parser.add_argument('--output_loss', type=str, nargs='?', help='loss output file')
-test_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
-test_parser.add_argument('--filters', type=int, default=100, nargs='?', help='number of CNN kernel filters.')
-test_parser.add_argument('--filter_sizes', type=int, default=[3,4,5], nargs='+', help='filter sizes')
-test_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
-test_parser.add_argument('--cd', type=float, default=0.5, nargs='?', help='CNN dropout')
-test_parser.add_argument('--ld', type=float, default=0.05, nargs='?', help='LSTM dropout')
-test_parser.add_argument('--tf', type=float, default=None, nargs='?', help='Teacher Forcing rate')
-test_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='max length of utterance')
-test_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
-test_parser.add_argument('--discount', type=float, default=1, nargs='?', help='test discount')
-test_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
-test_parser.add_argument('--batch_size', type=int, default=12, nargs='?', help='batch size')
-test_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
-test_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
-test_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
-
-dataset_parser = subparsers.add_parser('dataset', help='save the dataset files')
-
-# print(os.environ["CUDA_VISIBLE_DEVICES"])
-args = parser.parse_args()
-os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(str(x) for x in args.gpu)
-# print(os.environ["CUDA_VISIBLE_DEVICES"])
-
-import torch
-import torch.nn as nn
-from torch.nn import functional as F
-from torch.autograd import Variable
-from torch import optim
-from torch.utils import data as data_utils
-
-if args.baseline:
-    from baseline import DAMIC
-elif args.wd:
-    assert args.tf is not None
-    from DAMIC_wd import DAMIC
-else:
-    from DAMIC import DAMIC
-
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-dim = args.dim
-seed = args.random
-max_length = args.max_len
-print()
-print("random seed", seed)
-print("word embedding dimension", dim)
 
 def best_score_search(true_labels, predictions, f):
 # https://discuss.pytorch.org/t/multilabel-classification-how-to-binarize-scores-how-to-learn-thresholds/25396
@@ -166,7 +78,7 @@ def ret_index (li, s):
         # print(s)
         return -1
 
-def str2vector (li, str, text):
+def str2vector (li, str, text, max_utterance_lengths):
     if text:
         max_len = max_utterance_lengths 
         ret = [ li[s]+1 for s in str.split()]
@@ -191,8 +103,8 @@ def ret_predict (predicts, thresholds, discount=1.0):
         if discount < 1.0:
             ret = ret_predict(predicts, thresholds, discount)
         # ret[ms_tags.index('JK')] = 1
-        if not tuning:
-            print(ret)
+        # if not tuning:
+        #     print(ret)
     return ret
 
 def Find_Optimal_Cutoff (target, predicted):
@@ -239,411 +151,546 @@ def vector2tags (l, ms_tags):
             ret = ret + ' ' + ms_tags[i]
     return ret
 
-tuning = False
-# read in curpus
-ms_tags = ['CQ', 'FD', 'FQ', 'GG', 'IR', 'JK', 'NF', 'O', 'OQ', 'PA', 'PF', 'RQ']
-sw_tags = ['sd', 'b', 'sv', '%', 'aa', 'qy', 'ba', 'x', 'ny', 'fc', 'qw', 'nn', 'qy^d', 'bk', 'h', 'bf', '^q', 'bh', 'na', 'fo_o_fw_by_bc', 'ad', '^2', 'b^m', 'qo', 'qh', '^h', 'ar', 'ng', 'br', 'no', 'arp_nd', 'fp', 'qrr', 't3', 'oo_co_cc', 'aap_am', 't1', 'bd', 'qw^d', '^g', 'fa', 'ft', '+']
+def main(args):
 
-if args.swda:
-    ms_tags = sw_tags
-# nertypes = ['NUM', 'ORGANIZATION', 'PERSON', 'URL', 'LOCATION', 'EMAIL', 'TECH']
-nertypes = ['NUM', 'ORGANIZATION', 'PERSON', 'URL', 'LOCATION', 'TECH']
-# ms_entitiedbowpath = os.path.normpath("./data/msdialog/old/collapsed_msdialog.csv")
-ms_entitiedbowpath = os.path.normpath(args.data_file+'.csv')
+    os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(str(x) for x in args.gpu)
+    # print(os.environ["CUDA_VISIBLE_DEVICES"])
 
-df = pd.read_csv(ms_entitiedbowpath)
+    
 
-# conversation_numbers = df['conversation_no']
-utterance_tags = df['tags']
-utterances = df['utterance']
-utterance_status = df['utterance_status']
-utterance_lengths = df['utterance_lengths']
+    # data loading
 
-max_utterance_lengths = np.minimum(max(utterance_lengths), max_length)
-print('max utterance length', max_utterance_lengths)
+    dim = args.dim
+    seed = args.random
+    max_length = args.max_len
+    print()
+    print("random seed", seed)
+    print("word embedding dimension", dim)
 
-
-all_dialogs = []
-all_tags = []
-
-for i in range(len(utterances)):
-    if utterance_status[i] == "B":
-        dialog_utterances = [' '.join(utterances[i].split()[:max_length])]
-        dialog_tags = [utterance_tags[i]]
-
+    if sys.argv[1] == 'tune':
+        tuning = True
     else:
-        dialog_utterances.append(' '.join(utterances[i].split()[:max_length]))
-        dialog_tags.append(utterance_tags[i])
-        if utterance_status[i] == 'E':
-            all_dialogs.append(dialog_utterances)
-            all_tags.append(dialog_tags)
+        tuning = False
 
-combo_dict = {}
-for turn in all_tags:
-    for sent in turn:
-        labels = ' '.join(sorted(sent.split()))
-        combo_dict[labels] = combo_dict.setdefault(labels, 0) + 1
+    # read in curpus
+    ms_tags = ['CQ', 'FD', 'FQ', 'GG', 'IR', 'JK', 'NF', 'O', 'OQ', 'PA', 'PF', 'RQ']
+    sw_tags = ['sd', 'b', 'sv', '%', 'aa', 'qy', 'ba', 'x', 'ny', 'fc', 'qw', 'nn', 'qy^d', 'bk', 'h', 'bf', '^q', 'bh', 'na', 'fo_o_fw_by_bc', 'ad', '^2', 'b^m', 'qo', 'qh', '^h', 'ar', 'ng', 'br', 'no', 'arp_nd', 'fp', 'qrr', 't3', 'oo_co_cc', 'aap_am', 't1', 'bd', 'qw^d', '^g', 'fa', 'ft', '+']
 
-sorted_combos = sorted(combo_dict.items(), key=lambda x: x[1], reverse=True)
-label_dict = {item[0]: item[1] for item in sorted_combos[:32]}
+    if args.swda:
+        ms_tags = sw_tags
+    # nertypes = ['NUM', 'ORGANIZATION', 'PERSON', 'URL', 'LOCATION', 'EMAIL', 'TECH']
+    nertypes = ['NUM', 'ORGANIZATION', 'PERSON', 'URL', 'LOCATION', 'TECH']
+    # ms_entitiedbowpath = os.path.normpath("./data/msdialog/old/collapsed_msdialog.csv")
+    ms_entitiedbowpath = os.path.normpath(args.data_file+'.csv')
 
-dialog_lengths = [len(dialog) for dialog in all_dialogs]
+    df = pd.read_csv(ms_entitiedbowpath)
 
-# print(label_dict)
+    # conversation_numbers = df['conversation_no']
+    utterance_tags = df['tags']
+    utterances = df['utterance']
+    utterance_status = df['utterance_status']
+    utterance_lengths = df['utterance_lengths']
 
-X_train, X_val, y_train, y_val = train_test_split(all_dialogs, all_tags, test_size=0.1, random_state=seed)
-
-X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.1, random_state=seed)
-
-if args.da_filter:
-    print("[uncommon DAs filted]")
-    y_train = da_filter(label_dict, y_train)
-    y_val = da_filter(label_dict, y_val)
-    y_test = da_filter(label_dict, y_test)
-
-counts_train = [len(x) for x in y_train]
-counts_test = [len(x) for x in y_test]
-counts_val = [len(x) for x in y_val]
-
-print('Statistics of training set:')
-print('Utterances:', sum(counts_train))
-print('Min. # Turns Per Dialog', min(counts_train))
-print('Max. # Turns Per Dialog', max(counts_train))
-print('Avg. # Turns Per Dialog:', sum(counts_train)/len(counts_train))
-print('Avg. # DAs Per Utterance', sum(sum(len(y.split()) for y in x) for x in y_train)/sum(counts_train))
-print('Avg. # Words Per Utterance', sum(sum(len(y.split()) for y in x) for x in X_train)/sum(counts_train))
-print()
-print('Statistics of validation set:')
-print('Utterances:', sum(counts_val))
-print('Min. # Turns Per Dialog', min(counts_val))
-print('Max. # Turns Per Dialog', max(counts_val))
-print('Avg. # Turns Per Dialog:', sum(counts_val)/len(counts_val))
-print('Avg. # DAs Per Utterance', sum(sum(len(y.split()) for y in x) for x in y_val)/sum(counts_val))
-print('Avg. # Words Per Utterance', sum(sum(len(y.split()) for y in x) for x in X_val)/sum(counts_val))
-print()
-print('Statistics testing sets:')
-print('Utterances:', sum(counts_test))
-print('Min. # Turns Per Dialog', min(counts_test))
-print('Max. # Turns Per Dialog', max(counts_test))
-print('Avg. # Turns Per Dialog:', sum(counts_test)/len(counts_test))
-print('Avg. # DAs Per Utterance', sum(sum(len(y.split()) for y in x) for x in y_test)/sum(counts_test))
-print('Avg. # Words Per Utterance', sum(sum(len(y.split()) for y in x) for x in X_test)/sum(counts_test))
+    max_utterance_lengths = np.minimum(max(utterance_lengths), max_length)
+    print('max utterance length', max_utterance_lengths)
 
 
-# read in dict
-bow_dict = {}
-target_vocab = []
-with open(args.data_file+'.tab', 'r') as f:
-# with open("./data/msdialog/old/entitied_bow.tab", 'r') as f:
-    for line in f:
-        items = line.split('\t')
-        key, value = items[0], int(items[1])
-        # bow_dict[key] = value
-        
-        # if int(value) > 5:
-        target_vocab.append(key)
-        
-# if args.remove_ne:
-#     print("[name entity tags removed]")
-#     for term in nertypes:
-#         del bow_dict[term]
+    all_dialogs = []
+    all_tags = []
 
-output_size = len(ms_tags)
+    for i in range(len(utterances)):
+        if utterance_status[i] == "B":
+            dialog_utterances = [' '.join(utterances[i].split()[:max_length])]
+            dialog_tags = [utterance_tags[i]]
 
-word_to_ix = {word: i for i, word in enumerate(target_vocab)}
-
-# embedding begins!
-glove_path = '/data/yue/embeddings/glove'
-if args.msdialog:
-    print('[Using msdialog corpus]')
-    vectors = bcolz.open(glove_path+'/msdialog_embeddings.'+str(dim)+'.dat')[:]
-    words = pickle.load(open(glove_path+'/msdialog_embeddings.'+str(dim)+'_words.pkl', 'rb'))
-    word2idx = pickle.load(open(glove_path+'/msdialog_embeddings.'+str(dim)+'_idx.pkl', 'rb'))
-else:
-    vectors = bcolz.open(glove_path+'/6B.'+str(dim)+'.dat')[:]
-    words = pickle.load(open(glove_path+'/6B.'+str(dim)+'_words.pkl', 'rb'))
-    word2idx = pickle.load(open(glove_path+'/6B.'+str(dim)+'_idx.pkl', 'rb'))
-
-glove = {w: vectors[word2idx[w]] for w in words}
-
-# print(glove['The'])
-# print(glove['.com'])
-
-# with padding vector
-matrix_len = len(target_vocab) + 1
-weights_matrix = np.zeros((matrix_len, dim))
-
-# the padding vector
-weights_matrix[0] = np.zeros((dim, ))
-
-words_found = 0
-
-for i, word in enumerate(target_vocab):
-    try: 
-        weights_matrix[i+1] = glove[word]
-        words_found += 1
-    except KeyError:
-        weights_matrix[i+1] = np.random.normal(scale=0.6, size=(dim, ))
-
-
-# print(weights_matrix.shape[0])
-
-weights_matrix = torch.Tensor(weights_matrix)
-
-print(words_found,'/',len(target_vocab), 'words found embeddings')
-
-print('Preparing data ...')
-
-max_d = max(dialog_lengths)
-max_u = max_utterance_lengths
-
-train_n_iters = len(X_train)
-
-train_data = [ [str2vector(word_to_ix, sent, True) for sent in X_train[i]] for i in range(train_n_iters)]
-train_target = [ [str2vector(ms_tags, sent, False) for sent in y_train[i]] for i in range(train_n_iters)]
-
-# train_loader = DAMICDataset(train_data, train_target)
-
-
-val_n_iters = len(X_val)
-
-val_data = [ [str2vector(word_to_ix, sent, True) for sent in X_val[i]] for i in range(val_n_iters)]
-val_target = [ [str2vector(ms_tags, sent, False) for sent in y_val[i]] for i in range(val_n_iters)]
-
-# val_loader = DAMICDataset(val_data, val_target)
-
-
-test_n_iters = len(X_test)
-
-test_data = [ [str2vector(word_to_ix, sent, True) for sent in X_test[i]] for i in range(test_n_iters)]
-test_target = [ [str2vector(ms_tags, sent, False) for sent in y_test[i]] for i in range(test_n_iters)]
-
-# test_loader = DAMICDataset(test_data, test_target)
-
-if sys.argv[1] == 'train':
-
-    # Global setup
-    hidden_size = args.lstm_hidden
-    num_layers = args.lstm_layers
-    n_epochs = args.epoch
-    criterion = nn.BCELoss()
-    # criterion = nn.MultiLabelSoftMarginLoss()
-    patient = args.patient
-    learning_rate = args.lr
-    bi_lstm = args.bi
-    n_filters = args.filters
-    filter_sizes = args.filter_sizes
-    c_dropout = args.cd
-    l_dropout = args.ld
-    batch_size = args.batch_size
-    teacher_forcing_ratio = args.tf
-
-    tuning = args.tune
-
-    save_path = './model/'+randomword(10)+'/'
-
-    if not tuning: 
-        print()
-        print('Parameters')
-        print('lstm_hidden_size', hidden_size)
-        print('lstm_layers', num_layers)
-        print('epochs', n_epochs)
-        print('patient', patient)
-        print('learning_rate', learning_rate)
-        print('bi_lstm', bi_lstm)
-        print('n_filters', n_filters)
-        print('filter_sizes', filter_sizes)
-        print('batch_size', batch_size)
-        print('CNN dropout', c_dropout)
-        print('LSTM dropout', l_dropout)
-        print('Teacher Forcing rate', teacher_forcing_ratio)
-        print()
-    print('model will be saved to', save_path)
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-
-    # torch.backends.cudnn.enabled = False
-    model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio)
-    model = model.to(device)
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-    if torch.cuda.device_count() > 1:
-        if not tuning:
-            print("Let's use", torch.cuda.device_count(), "GPUs!")
-        # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-        model = nn.DataParallel(model)
-
-    losses = np.zeros(n_epochs)
-    vlosses = np.zeros(n_epochs)
-
-    best_epoch = 0
-    stop_counter = 0
-    best_score = None
-
-    train_loader_dataset = batch_maker(train_data, train_target, batch_size)
-    val_loader_dataset = batch_maker(val_data, val_target, batch_size)
-    # learning
-    for epoch in range(n_epochs):
-        ###################
-        # train the model #
-        ###################
-        model.train() # prep model for training
-
-        for data in train_loader_dataset:
-            src_seqs, trg_seqs = data
-            # inputs, targets = Variable(inputs.to(device)), Variable(targets.to(device))
-            src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
-
-            outputs = model(src_seqs, trg_seqs)
-
-            # print(outputs)
-            outputs = outputs.to(device)
-
-            optimizer.zero_grad()
-            loss = criterion(outputs, trg_seqs)
-            loss.backward()
-            optimizer.step()
-            # print(loss.item())
-            losses[epoch] += loss.item()
-        if not tuning:
-            print('epoch', epoch+1, ' average train loss: ', losses[epoch] / len(train_loader_dataset))
-
-        ######################    
-        # validate the model #
-        ######################
-        model.eval() # prep model for evaluation
-
-        for i, data in enumerate(val_loader_dataset, 0):
-            src_seqs, trg_seqs = data    
-            src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
-
-            outputs = model(src_seqs, trg_seqs)
-
-            # print(outputs)
-            outputs = outputs.to(device)
-            vlosses[epoch] += criterion(outputs, trg_seqs).item()
-        if not tuning:
-            print('epoch', epoch+1, ' average val loss: ', vlosses[epoch] / len(val_loader_dataset))
-
-        if best_score is None or vlosses[epoch] < best_score:
-            best_score = vlosses[epoch]
-            best_epoch = epoch+1
-            torch.save(model.state_dict(), save_path+str(best_epoch))
-            stop_counter = 0
-            if not tuning:
-                print('epoch', best_epoch, 'model updated')
         else:
-            stop_counter += 1
+            dialog_utterances.append(' '.join(utterances[i].split()[:max_length]))
+            dialog_tags.append(utterance_tags[i])
+            if utterance_status[i] == 'E':
+                all_dialogs.append(dialog_utterances)
+                all_tags.append(dialog_tags)
 
-        if stop_counter >= patient:
-            print("Early stopping")
-            break
-    if not tuning:
-        print('Models saved to', save_path)
-        print('Best epoch', str(best_epoch), ', with score', str(best_score / len(val_loader_dataset)))
+    combo_dict = {}
+    for turn in all_tags:
+        for sent in turn:
+            labels = ' '.join(sorted(sent.split()))
+            combo_dict[labels] = combo_dict.setdefault(labels, 0) + 1
+
+    sorted_combos = sorted(combo_dict.items(), key=lambda x: x[1], reverse=True)
+    label_dict = {item[0]: item[1] for item in sorted_combos[:32]}
+
+    dialog_lengths = [len(dialog) for dialog in all_dialogs]
+
+    # print(label_dict)
+
+    X_train, X_val, y_train, y_val = train_test_split(all_dialogs, all_tags, test_size=0.1, random_state=seed)
+
+    X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.1, random_state=seed)
+
+    if args.da_filter:
+        print("[uncommon DAs filted]")
+        y_train = da_filter(label_dict, y_train)
+        y_val = da_filter(label_dict, y_val)
+        y_test = da_filter(label_dict, y_test)
+
+    counts_train = [len(x) for x in y_train]
+    counts_test = [len(x) for x in y_test]
+    counts_val = [len(x) for x in y_val]
+
+    print('Statistics of training set:')
+    print('Utterances:', sum(counts_train))
+    print('Min. # Turns Per Dialog', min(counts_train))
+    print('Max. # Turns Per Dialog', max(counts_train))
+    print('Avg. # Turns Per Dialog:', sum(counts_train)/len(counts_train))
+    print('Avg. # DAs Per Utterance', sum(sum(len(y.split()) for y in x) for x in y_train)/sum(counts_train))
+    print('Avg. # Words Per Utterance', sum(sum(len(y.split()) for y in x) for x in X_train)/sum(counts_train))
+    print()
+    print('Statistics of validation set:')
+    print('Utterances:', sum(counts_val))
+    print('Min. # Turns Per Dialog', min(counts_val))
+    print('Max. # Turns Per Dialog', max(counts_val))
+    print('Avg. # Turns Per Dialog:', sum(counts_val)/len(counts_val))
+    print('Avg. # DAs Per Utterance', sum(sum(len(y.split()) for y in x) for x in y_val)/sum(counts_val))
+    print('Avg. # Words Per Utterance', sum(sum(len(y.split()) for y in x) for x in X_val)/sum(counts_val))
+    print()
+    print('Statistics testing sets:')
+    print('Utterances:', sum(counts_test))
+    print('Min. # Turns Per Dialog', min(counts_test))
+    print('Max. # Turns Per Dialog', max(counts_test))
+    print('Avg. # Turns Per Dialog:', sum(counts_test)/len(counts_test))
+    print('Avg. # DAs Per Utterance', sum(sum(len(y.split()) for y in x) for x in y_test)/sum(counts_test))
+    print('Avg. # Words Per Utterance', sum(sum(len(y.split()) for y in x) for x in X_test)/sum(counts_test))
 
 
-if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != ''):
+    # read in dict
+    bow_dict = {}
+    target_vocab = []
+    with open(args.data_file+'.tab', 'r') as f:
+    # with open("./data/msdialog/old/entitied_bow.tab", 'r') as f:
+        for line in f:
+            items = line.split('\t')
+            key, value = items[0], int(items[1])
+            # bow_dict[key] = value
+            
+            # if int(value) > 5:
+            target_vocab.append(key)
+            
+    # if args.remove_ne:
+    #     print("[name entity tags removed]")
+    #     for term in nertypes:
+    #         del bow_dict[term]
 
-    criterion = nn.BCELoss()
-    test_discount = 1.0
+    output_size = len(ms_tags)
 
-    if tuning:
-        directory = save_path
-        epoch = best_epoch
-        result_file = ''
-        loss_file = ''
+    word_to_ix = {word: i for i, word in enumerate(target_vocab)}
+
+    # embedding begins!
+    glove_path = '/data/yue/embeddings/glove'
+    if args.msdialog:
+        print('[Using msdialog corpus]')
+        vectors = bcolz.open(glove_path+'/msdialog_embeddings.'+str(dim)+'.dat')[:]
+        words = pickle.load(open(glove_path+'/msdialog_embeddings.'+str(dim)+'_words.pkl', 'rb'))
+        word2idx = pickle.load(open(glove_path+'/msdialog_embeddings.'+str(dim)+'_idx.pkl', 'rb'))
     else:
-        directory = args.models[0]
-        epoch = args.epoch
-        result_file = args.output_result[0]
-        loss_file = args.output_loss
+        vectors = bcolz.open(glove_path+'/6B.'+str(dim)+'.dat')[:]
+        words = pickle.load(open(glove_path+'/6B.'+str(dim)+'_words.pkl', 'rb'))
+        word2idx = pickle.load(open(glove_path+'/6B.'+str(dim)+'_idx.pkl', 'rb'))
+
+    glove = {w: vectors[word2idx[w]] for w in words}
+
+    # print(glove['The'])
+    # print(glove['.com'])
+
+    # with padding vector
+    matrix_len = len(target_vocab) + 1
+    weights_matrix = np.zeros((matrix_len, dim))
+
+    # the padding vector
+    weights_matrix[0] = np.zeros((dim, ))
+
+    words_found = 0
+
+    for i, word in enumerate(target_vocab):
+        try: 
+            weights_matrix[i+1] = glove[word]
+            words_found += 1
+        except KeyError:
+            weights_matrix[i+1] = np.random.normal(scale=0.6, size=(dim, ))
+
+    print(words_found,'/',len(target_vocab), 'words found embeddings')
+
+    print('Preparing data ...')
+
+    max_d = max(dialog_lengths)
+    max_u = max_utterance_lengths
+
+    train_n_iters = len(X_train)
+
+    train_data = [ [str2vector(word_to_ix, sent, True, max_utterance_lengths) for sent in X_train[i]] for i in range(train_n_iters)]
+    train_target = [ [str2vector(ms_tags, sent, False, max_utterance_lengths) for sent in y_train[i]] for i in range(train_n_iters)]
+
+    # train_loader = DAMICDataset(train_data, train_target)
+
+
+    val_n_iters = len(X_val)
+
+    val_data = [ [str2vector(word_to_ix, sent, True, max_utterance_lengths) for sent in X_val[i]] for i in range(val_n_iters)]
+    val_target = [ [str2vector(ms_tags, sent, False, max_utterance_lengths) for sent in y_val[i]] for i in range(val_n_iters)]
+
+    # val_loader = DAMICDataset(val_data, val_target)
+
+
+    test_n_iters = len(X_test)
+
+    test_data = [ [str2vector(word_to_ix, sent, True, max_utterance_lengths) for sent in X_test[i]] for i in range(test_n_iters)]
+    test_target = [ [str2vector(ms_tags, sent, False, max_utterance_lengths) for sent in y_test[i]] for i in range(test_n_iters)]
+
+    # test_loader = DAMICDataset(test_data, test_target)
+
+    if not tuning:
+        run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning)
+    else:
+        def objective(params):
+            args.lstm_layers = params['lstm_layers']
+            args.lstm_hidden = params['lstm_hidden']
+            # args.dim = params['dim']
+            args.lr = params['lr']
+            args.filters = params['filters']
+            # args.filter_sizes = params['filter_sizes']
+            args.cd = params['cd']
+            args.tf = params['tf']
+            args.ld = params['ld']
+            # args.max_len = params['max_len']
+            return run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning)
+
+        # WD
+        space = {
+            'lstm_layers': scope.int(hp.quniform('lstm_layers', 4, 8, 1)),
+            'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 300, 500, 20)),
+            # 'dim': scope.int(hp.quniform('dim', 100, 300, 100)),
+            'lr': hp.quniform('lr', 0.0008, 0.002, 0.0001),
+            'filters': scope.int(hp.quniform('filters', 150, 250, 20)),
+            # 'filter_sizes': scope.int(hp.quniform('filter_sizes', 3, 6, 1)),
+            'cd': hp.quniform('cd', 0.4, 0.8, 0.1),
+            'tf': hp.quniform('tf', 0.5, 0.9, 0.1),
+            'ld': hp.quniform('ld', 0.1, 0.2, 0.05),
+            # 'max_len': scope.int(hp.quniform('max_len', 800, 1200, 100)),
+            # 'batch_size': scope.int(hp.quniform('batch_size', 10, 100, 10)),
+        }
+
+
+        best_params = fmin(fn=objective, space=space, algo=tpe.suggest, max_evals=1000)
+
+        best_params = space_eval(space,best_params)
+
+        print(best_params)
+
+        if args.baseline:
+            model_name = "baseline"
+        elif args.wd:
+            model_name = "DAMIC_wd"
+        else:
+            model_name = "DAMIC"
+
+
+        with io.open("./output/params/"+model_name+"_best_params.tab",'a',encoding="utf8") as bp:
+            corpus = args.data_file
+            for k, v in best_params.items():
+                bp.write("\t".join([corpus, model_name, k, str(v)])+"\n")
+        return best_params
+        
+
+def run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning):
+    import torch
+    import torch.nn as nn
+    from torch.nn import functional as F
+    from torch.autograd import Variable
+    from torch import optim
+    from torch.utils import data as data_utils
+
+    if args.baseline:
+        from baseline import DAMIC
+    elif args.wd:
+        assert args.tf is not None
+        from DAMIC_wd import DAMIC
+    else:
+        from DAMIC import DAMIC
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    weights_matrix = torch.Tensor(weights_matrix)
+
+    if tuning or sys.argv[1] == 'train':
 
         # Global setup
         hidden_size = args.lstm_hidden
         num_layers = args.lstm_layers
+        n_epochs = args.epoch
+        criterion = nn.BCELoss()
+        # criterion = nn.MultiLabelSoftMarginLoss()
+        patient = args.patient
+        learning_rate = args.lr
         bi_lstm = args.bi
         n_filters = args.filters
         filter_sizes = args.filter_sizes
         c_dropout = args.cd
         l_dropout = args.ld
-        test_discount = args.discount
         batch_size = args.batch_size
         teacher_forcing_ratio = args.tf
-        if teacher_forcing_ratio is not None:
-            teacher_forcing_ratio = .0
 
-    if not tuning:
-        print('lstm_hidden_size', hidden_size)
-        print('lstm_layers', num_layers)
-        print('bi_lstm', bi_lstm)
-        print('n_filters', n_filters)
-        print('filter_sizes', filter_sizes)
-        print('batch_size', batch_size)
-        print('CNN dropout', c_dropout)
-        print('LSTM dropout', l_dropout)
-        print('test discount', test_discount)
-        print('Teacher Forcing rate', teacher_forcing_ratio)
+        save_path = './model/'+randomword(10)+'/'
 
-    if result_file and result_file != '':
-        outf = open(result_file, 'w')
-        out = 'dialogue_id, utterance_id, dialogue_length, utterance_length, utterance, references, predictions, hamming_score, p, r, f1\n'
-    if loss_file and loss_file != '':
-        lfile = open(loss_file, 'w')
-        lout = ''
+        if not tuning: 
+            print()
+            print('Parameters')
+            print('lstm_hidden_size', hidden_size)
+            print('lstm_layers', num_layers)
+            print('epochs', n_epochs)
+            print('patient', patient)
+            print('learning_rate', learning_rate)
+            print('bi_lstm', bi_lstm)
+            print('n_filters', n_filters)
+            print('filter_sizes', filter_sizes)
+            print('batch_size', batch_size)
+            print('CNN dropout', c_dropout)
+            print('LSTM dropout', l_dropout)
+            print('Teacher Forcing rate', teacher_forcing_ratio)
+            print()
+        print('model will be saved to', save_path)
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
 
-    bloss = 9999999.99;
-    breferences = []
-    bpredicts = []
-    bfile = ''
+        # torch.backends.cudnn.enabled = False
+        model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio)
+        model = model.to(device)
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio)
-    model = model.to(device)
+        if torch.cuda.device_count() > 1:
+            if not tuning:
+                print("Let's use", torch.cuda.device_count(), "GPUs!")
+            # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
+            model = nn.DataParallel(model)
 
-    if torch.cuda.device_count() > 1:
-        if not tuning:
-            print("Let's use", torch.cuda.device_count(), "GPUs!")
-        # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
-        model = nn.DataParallel(model)
+        losses = np.zeros(n_epochs)
+        vlosses = np.zeros(n_epochs)
 
-    for filename in os.listdir(directory):
-        if '.' in filename: continue
-        # print('Epoch', filename)
-        if loss_file and loss_file != '':
-            lout = lout + filename
-        if epoch > 0 and filename != str(epoch):
-            # print('skipped')
-            continue
-
-        model.load_state_dict(torch.load(directory+filename))
-        model.eval()
+        best_epoch = 0
+        stop_counter = 0
+        best_score = None
 
         train_loader_dataset = batch_maker(train_data, train_target, batch_size)
         val_loader_dataset = batch_maker(val_data, val_target, batch_size)
-        test_loader_dataset = batch_maker(test_data, test_target, batch_size)
+        # learning
+        for epoch in range(n_epochs):
+            ###################
+            # train the model #
+            ###################
+            model.train() # prep model for training
+
+            for data in train_loader_dataset:
+                src_seqs, trg_seqs = data
+                # inputs, targets = Variable(inputs.to(device)), Variable(targets.to(device))
+                src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
+
+                outputs = model(src_seqs, trg_seqs)
+
+                # print(outputs)
+                outputs = outputs.to(device)
+
+                optimizer.zero_grad()
+                loss = criterion(outputs, trg_seqs)
+                loss.backward()
+                optimizer.step()
+                # print(loss.item())
+                losses[epoch] += loss.item()
+            if not tuning:
+                print('epoch', epoch+1, ' average train loss: ', losses[epoch] / len(train_loader_dataset))
+
+            ######################    
+            # validate the model #
+            ######################
+            model.eval() # prep model for evaluation
+
+            for i, data in enumerate(val_loader_dataset, 0):
+                src_seqs, trg_seqs = data    
+                src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
+
+                outputs = model(src_seqs, trg_seqs)
+
+                # print(outputs)
+                outputs = outputs.to(device)
+                vlosses[epoch] += criterion(outputs, trg_seqs).item()
+            if not tuning:
+                print('epoch', epoch+1, ' average val loss: ', vlosses[epoch] / len(val_loader_dataset))
+
+            if best_score is None or vlosses[epoch] < best_score:
+                best_score = vlosses[epoch]
+                best_epoch = epoch+1
+                torch.save(model.state_dict(), save_path+str(best_epoch))
+                stop_counter = 0
+                if not tuning:
+                    print('epoch', best_epoch, 'model updated')
+            else:
+                stop_counter += 1
+
+            if stop_counter >= patient:
+                print("Early stopping")
+                break
+        if not tuning:
+            print('Models saved to', save_path)
+            print('Best epoch', str(best_epoch), ', with score', str(best_score / len(val_loader_dataset)))
+
+
+    if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != ''):
+
+        criterion = nn.BCELoss()
+        test_discount = 1.0
+
+        if tuning:
+            directory = save_path
+            epoch = best_epoch
+            result_file = ''
+            loss_file = ''
+        else:
+            directory = args.models[0]
+            epoch = args.epoch
+            result_file = args.output_result[0]
+            loss_file = args.output_loss
+
+            # Global setup
+            hidden_size = args.lstm_hidden
+            num_layers = args.lstm_layers
+            bi_lstm = args.bi
+            n_filters = args.filters
+            filter_sizes = args.filter_sizes
+            c_dropout = args.cd
+            l_dropout = args.ld
+            test_discount = args.discount
+            batch_size = args.batch_size
+            teacher_forcing_ratio = args.tf
+            if teacher_forcing_ratio is not None:
+                teacher_forcing_ratio = .0
+
+        if not tuning:
+            print('lstm_hidden_size', hidden_size)
+            print('lstm_layers', num_layers)
+            print('bi_lstm', bi_lstm)
+            print('n_filters', n_filters)
+            print('filter_sizes', filter_sizes)
+            print('batch_size', batch_size)
+            print('CNN dropout', c_dropout)
+            print('LSTM dropout', l_dropout)
+            print('test discount', test_discount)
+            print('Teacher Forcing rate', teacher_forcing_ratio)
+
+        if result_file and result_file != '':
+            outf = open(result_file, 'w')
+            out = 'dialogue_id, utterance_id, dialogue_length, utterance_length, utterance, references, predictions, hamming_score, p, r, f1\n'
+        if loss_file and loss_file != '':
+            lfile = open(loss_file, 'w')
+            lout = ''
+
+        bloss = 9999999.99;
+        breferences = []
+        bpredicts = []
+        bfile = ''
+
+        model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio)
+        model = model.to(device)
+
+        if torch.cuda.device_count() > 1:
+            if not tuning:
+                print("Let's use", torch.cuda.device_count(), "GPUs!")
+            # dim = 0 [30, xxx] -> [10, ...], [10, ...], [10, ...] on 3 GPUs
+            model = nn.DataParallel(model)
+
+        for filename in os.listdir(directory):
+            if '.' in filename: continue
+            # print('Epoch', filename)
+            if loss_file and loss_file != '':
+                lout = lout + filename
+            if epoch > 0 and filename != str(epoch):
+                # print('skipped')
+                continue
+
+            model.load_state_dict(torch.load(directory+filename))
+            model.eval()
+
+            train_loader_dataset = batch_maker(train_data, train_target, batch_size)
+            val_loader_dataset = batch_maker(val_data, val_target, batch_size)
+            test_loader_dataset = batch_maker(test_data, test_target, batch_size)
+
+            loss = 0.0 # For plotting
+            for data in train_loader_dataset:
+                src_seqs, trg_seqs = data
+                src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
+
+                outputs = model(src_seqs, trg_seqs)
+
+                # print(outputs)
+                outputs = outputs.to(device)
+                loss += criterion(outputs, trg_seqs).item()
+
+            tloss = loss / len(train_loader_dataset)
+            if loss_file and loss_file != '':
+                lout = lout + ',' + str(tloss)
+            if not tuning:
+                print('Epoch', filename, 'average train loss: ', tloss)
+
+            
+            loss = 0.0
+            references = None
+            predicts = None
+            for data in val_loader_dataset:
+                src_seqs, trg_seqs = data    
+                src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
+
+                outputs = model(src_seqs, trg_seqs)
+
+                # print(outputs)
+                outputs = outputs.to(device)
+                loss += criterion(outputs, trg_seqs).item()
+
+                reference = flattern_result(trg_seqs.cpu().numpy())
+                predict = flattern_result(outputs.detach().cpu().numpy())
+
+                if references is None or predicts is None:
+                    references = reference
+                    predicts = predict
+                else:
+                    # print(predicts, predict)
+                    references = np.append(references, reference, axis=0)
+                    predicts = np.append(predicts, predict, axis=0)
+
+            # print(references)
+
+            vloss = loss / len(val_loader_dataset)
+            if loss_file and loss_file != '':
+                lout = lout + ',' + str(vloss) + '\n'
+            if not tuning:
+                print('Epoch', filename, 'average val loss: ', vloss)
+
+            if vloss < bloss:
+                bloss = vloss
+                breferences = np.array(references);
+                bpredicts = np.array(predicts);
+                bfile = filename
+
+            torch.cuda.empty_cache()
+
+        best_score, thresholds = best_score_search(breferences, bpredicts, hamming_score)
+        if not tuning:
+            print('best validation epoch:', bfile, 'with score:', str(best_score))
+
+        # load the best model
+        model.load_state_dict(torch.load(directory+bfile))
+        model.eval()
 
         loss = 0.0 # For plotting
-        for data in train_loader_dataset:
-            src_seqs, trg_seqs = data
-            src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
-
-            outputs = model(src_seqs, trg_seqs)
-
-            # print(outputs)
-            outputs = outputs.to(device)
-            loss += criterion(outputs, trg_seqs).item()
-
-        tloss = loss / len(train_loader_dataset)
-        if loss_file and loss_file != '':
-            lout = lout + ',' + str(tloss)
-        if not tuning:
-            print('Epoch', filename, 'average train loss: ', tloss)
-
-        
-        loss = 0.0
         references = None
         predicts = None
-        for data in val_loader_dataset:
+
+        for data in test_loader_dataset:
             src_seqs, trg_seqs = data    
             src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
 
@@ -660,128 +707,132 @@ if tuning or (sys.argv[1] == 'test' and len(sys.argv) > 2 and sys.argv[1] != '')
                 references = reference
                 predicts = predict
             else:
-                # print(predicts, predict)
                 references = np.append(references, reference, axis=0)
                 predicts = np.append(predicts, predict, axis=0)
+                # print('p', p)
+                # print('r', r)
+                # if result_file != '':
+                #     out = out + str(i) + ',' + str(j)  + ',' + str(len(predict)) + ',' + str(len(X_test[i][j].split())) + ',"' + X_test[i][j] + '",' + vector2tags(r, ms_tags) + ',' + vector2tags(p, ms_tags) + ',' + str(hamming_score(r, p)) + ',' + str(f1(r, p)[0]) + ',' + str(f1(r, p)[1]) + ',' + str(f1(r, p)[2]) + '\n'
 
-        # print(references)
-
-        vloss = loss / len(val_loader_dataset)
-        if loss_file and loss_file != '':
-            lout = lout + ',' + str(vloss) + '\n'
+        tloss = loss / len(test_loader_dataset)
         if not tuning:
-            print('Epoch', filename, 'average val loss: ', vloss)
-
-        if vloss < bloss:
-            bloss = vloss
-            breferences = np.array(references);
-            bpredicts = np.array(predicts);
-            bfile = filename
+            print('average test loss: ', tloss)
 
         torch.cuda.empty_cache()
 
-    best_score, thresholds = best_score_search(breferences, bpredicts, hamming_score)
-    if not tuning:
-        print('best validation epoch:', bfile, 'with score:', str(best_score))
+        predictions = []
 
-    # load the best model
-    model.load_state_dict(torch.load(directory+bfile))
-    model.eval()
+        for j in range(len(predicts)):
+            predictions.append(ret_predict(predicts[j], thresholds))
 
-    loss = 0.0 # For plotting
-    references = None
-    predicts = None
+        # print(predictions)
 
-    for data in test_loader_dataset:
-        src_seqs, trg_seqs = data    
-        src_seqs, trg_seqs = src_seqs.to(device), trg_seqs.to(device)
+        references = np.array(references);
+        predictions = np.array(predictions);
 
-        outputs = model(src_seqs, trg_seqs)
+        acc = hamming_score(y_true=references, y_pred=predictions)
+        f1_scores = f1(y_true=references, y_pred=predictions)
 
-        # print(outputs)
-        outputs = outputs.to(device)
-        loss += criterion(outputs, trg_seqs).item()
+        scores = str(acc) + ',' + ','.join([str(x) for x in f1_scores])
+        print('Test Accuracy, Precision, Recall and F1 score: ', scores)
+        # f1 = f1_score(y_true=references, y_pred=predicts, average='weighted')
+        # print('weighted F1 score: ', f1)
+        
+        # print('weighted F1 score by chance: ', f1_score(y_true=references, y_pred=predicts_r, average='weighted'))
+        if not tuning:
+            print('Tag',':','Accuracy, (Precision, Recall, F1)')
+            for i in range(predictions.shape[1]):
+                predictions_t = np.array([[p[i]] for p in predictions])
+                references_t = np.array([[r[i]]for r in references])
+                print(ms_tags[i], ':',hamming_score(y_true=references_t, y_pred=predictions_t),',', f1(y_true=references_t, y_pred=predictions_t))
 
-        reference = flattern_result(trg_seqs.cpu().numpy())
-        predict = flattern_result(outputs.detach().cpu().numpy())
+            if result_file and result_file != '':
+                outf.write(out)
 
-        if references is None or predicts is None:
-            references = reference
-            predicts = predict
-        else:
-            references = np.append(references, reference, axis=0)
-            predicts = np.append(predicts, predict, axis=0)
-            # print('p', p)
-            # print('r', r)
-            # if result_file != '':
-            #     out = out + str(i) + ',' + str(j)  + ',' + str(len(predict)) + ',' + str(len(X_test[i][j].split())) + ',"' + X_test[i][j] + '",' + vector2tags(r, ms_tags) + ',' + vector2tags(p, ms_tags) + ',' + str(hamming_score(r, p)) + ',' + str(f1(r, p)[0]) + ',' + str(f1(r, p)[1]) + ',' + str(f1(r, p)[2]) + '\n'
+            if loss_file and loss_file != '':
+                lfile.write(lout)
 
-    tloss = loss / len(test_loader_dataset)
-    if not tuning:
-        print('average test loss: ', tloss)
+        return {'loss': -acc, 'status': STATUS_OK }
 
-    torch.cuda.empty_cache()
+if __name__ == "__main__":
+    parser = ArgumentParser()
 
-    predictions = []
+    subparsers = parser.add_subparsers(help='commands')
 
-    for j in range(len(predicts)):
-        predictions.append(ret_predict(predicts[j], thresholds))
+    # A train command
+    train_parser = subparsers.add_parser('train', help='train the model')
+    train_parser.add_argument('--lstm_layers', type=int, default=2, nargs='?', help='number of layers in LSTM')
+    train_parser.add_argument('--lstm_hidden', type=int, default=1024, nargs='?', help='hidden size in output MLP')
+    train_parser.add_argument('--dim', type=int, default=100, nargs='?', help='dimension of word embeddings')
+    train_parser.add_argument('--epoch', type=int, default=1000, nargs='?', help='number of epochs to run')
+    train_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
+    train_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
+    train_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
+    train_parser.add_argument('--patient', type=int, default=5, nargs='?', help='number of epochs to wait if no improvement and then stop the training.')
+    train_parser.add_argument('--lr', type=float, default=0.001, nargs='?', help='learning rate')
+    train_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
+    train_parser.add_argument('--filters', type=int, default=100, nargs='?', help='number of CNN kernel filters.')
+    train_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
+    train_parser.add_argument('--cd', type=float, default=0.5, nargs='?', help='CNN dropout')
+    train_parser.add_argument('--ld', type=float, default=0.05, nargs='?', help='LSTM dropout')
+    train_parser.add_argument('--tf', type=float, default=None, nargs='?', help='Teacher Forcing rate')
+    train_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='max length of utterance')
+    train_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
+    train_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
+    train_parser.add_argument('--batch_size', type=int, default=12, nargs='?', help='batch size')
+    train_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
+    train_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
+    train_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
 
-    # print(predictions)
+    # A tuning command
+    tune_parser = subparsers.add_parser('tune', help='tune the model')
+    tune_parser.add_argument('--dim', type=int, default=100, nargs='?', help='dimension of word embeddings')
+    tune_parser.add_argument('--epoch', type=int, default=1000, nargs='?', help='number of epochs to run')
+    tune_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
+    tune_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
+    tune_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
+    tune_parser.add_argument('--patient', type=int, default=5, nargs='?', help='number of epochs to wait if no improvement and then stop the training.')
+    tune_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
+    tune_parser.add_argument('--filter_sizes', type=int, default=[3,4,5], nargs='+', help='filter sizes')
+    tune_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
+    tune_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='max length of utterance')
+    tune_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
+    tune_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
+    tune_parser.add_argument('--batch_size', type=int, default=12, nargs='?', help='batch size')
+    tune_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
+    tune_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
+    tune_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
 
-    references = np.array(references);
-    predictions = np.array(predictions);
+     # A test command
+    test_parser = subparsers.add_parser('test', help='test the model')
+    test_parser.add_argument('--models', type=str, nargs=1, help='directory for model files', required=True)
+    test_parser.add_argument('--epoch', type=int, default=0, nargs='?', help='specify the epoch to test')
+    test_parser.add_argument('--lstm_layers', type=int, default=2, nargs='?', help='number of layers in LSTM')
+    test_parser.add_argument('--lstm_hidden', type=int, default=1024, nargs='?', help='hidden size in output MLP')
+    test_parser.add_argument('--dim', type=int, default=100, nargs='?', help='dimension of word embeddings')
+    test_parser.add_argument('--output_result', type=str, default=[''], nargs=1, help='file to store the test case result')
+    test_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
+    test_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
+    test_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
+    test_parser.add_argument('--output_loss', type=str, nargs='?', help='loss output file')
+    test_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
+    test_parser.add_argument('--filters', type=int, default=100, nargs='?', help='number of CNN kernel filters.')
+    test_parser.add_argument('--filter_sizes', type=int, default=[3,4,5], nargs='+', help='filter sizes')
+    test_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
+    test_parser.add_argument('--cd', type=float, default=0.5, nargs='?', help='CNN dropout')
+    test_parser.add_argument('--ld', type=float, default=0.05, nargs='?', help='LSTM dropout')
+    test_parser.add_argument('--tf', type=float, default=None, nargs='?', help='Teacher Forcing rate')
+    test_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='max length of utterance')
+    test_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
+    test_parser.add_argument('--discount', type=float, default=1, nargs='?', help='test discount')
+    test_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
+    test_parser.add_argument('--batch_size', type=int, default=12, nargs='?', help='batch size')
+    test_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
+    test_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
+    test_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
 
-    acc = hamming_score(y_true=references, y_pred=predictions)
-    f1_scores = f1(y_true=references, y_pred=predictions)
+    dataset_parser = subparsers.add_parser('dataset', help='save the dataset files')
 
-    scores = str(acc) + ',' + ','.join([str(x) for x in f1_scores])
-    print('Test Accuracy, Precision, Recall and F1 score: ', scores)
-    # f1 = f1_score(y_true=references, y_pred=predicts, average='weighted')
-    # print('weighted F1 score: ', f1)
-    
-    # print('weighted F1 score by chance: ', f1_score(y_true=references, y_pred=predicts_r, average='weighted'))
-    if not tuning:
-        print('Tag',':','Accuracy, (Precision, Recall, F1)')
-        for i in range(predictions.shape[1]):
-            predictions_t = np.array([[p[i]] for p in predictions])
-            references_t = np.array([[r[i]]for r in references])
-            print(ms_tags[i], ':',hamming_score(y_true=references_t, y_pred=predictions_t),',', f1(y_true=references_t, y_pred=predictions_t))
-
-        if result_file and result_file != '':
-            outf.write(out)
-
-        if loss_file and loss_file != '':
-            lfile.write(lout)
-
-    # # Add prediction probability to dataframe
-    # data['pred_proba'] = result.predict(data[train_cols])
-
-    # # Find optimal probability threshold
-    # threshold = Find_Optimal_Cutoff(data['admit'], data['pred_proba'])
-    # print threshold
-    # # [0.31762762459360921]
-
-    # # Find prediction to the dataframe applying threshold
-    # data['pred'] = data['pred_proba'].map(lambda x: 1 if x > threshold else 0)
-
-    # # Print confusion Matrix
-    # from sklearn.metrics import confusion_matrix
-    # confusion_matrix(data['admit'], data['pred'])
-    # # array([[175,  98],
-    # #        [ 46,  81]])
-
-# else:
-#     print('ERROR: Unknown command!')
-
-# # Online training
-# hidden = None
-
-# while True:
-#     inputs = get_latest_sample()
-#     outputs, hidden = model(inputs, hidden)
-
-#     optimizer.zero_grad()
-#     loss = criterion(outputs, inputs)
-#     loss.backward()
-#     optimizer.step()
+    # print(os.environ["CUDA_VISIBLE_DEVICES"])
+    args = parser.parse_args()
+    main(args)
