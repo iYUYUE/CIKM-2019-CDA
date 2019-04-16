@@ -17,11 +17,14 @@ Dialogue Act Modelling in Information-seeking Conversations
 - Use *markov_chain.py* to produce Markov chain from original *MSDialog-Intent.json* file
 
 ## Baseline Model
-python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --tune True --baseline True
+- Train: python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --baseline True
 
 ## DAMIC Model
 - Train: python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog
 - Test: python src/run.py test
+- Tune: python src/run.py tune --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog
 
 ## DAMIC Wide-and-Deep Model
-python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --tune True --tf 0.5 --lstm_hidden 128 --batch_size 24 --wd True
+- Train: python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --cd 0.4 --filters 180 --ld 0.2 --lr 0.001 --tf 0.9 --lstm_hidden 420 --lstm_layers 7 --batch_size 50 --wd True
+- Test: python src/run.py test --model ./model/zsjgqqmgmy/ --epoch 9 --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --cd 0.4 --filters 180 --ld 0.2 --tf 0.9 --lstm_hidden 420 --lstm_layers 7 --batch_size 50 --wd True
+- Tune: python src/run.py tune --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --batch_size 50 --wd True
