@@ -348,7 +348,7 @@ def main(args):
     # test_loader = DAMICDataset(test_data, test_target)
 
     if not tuning:
-        run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning)
+        run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning, ms_tags)
     else:
         def objective(params):
             args.lstm_layers = params['lstm_layers']
@@ -361,19 +361,34 @@ def main(args):
             args.tf = params['tf']
             args.ld = params['ld']
             # args.max_len = params['max_len']
-            return run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning)
+            return run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning, ms_tags)
 
-        # WD
+        # # DAMIC WD
+        # space = {
+        #     'lstm_layers': scope.int(hp.quniform('lstm_layers', 4, 8, 1)),
+        #     'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 300, 500, 20)),
+        #     # 'dim': scope.int(hp.quniform('dim', 100, 300, 100)),
+        #     'lr': hp.quniform('lr', 0.0008, 0.002, 0.0001),
+        #     'filters': scope.int(hp.quniform('filters', 150, 250, 20)),
+        #     # 'filter_sizes': scope.int(hp.quniform('filter_sizes', 3, 6, 1)),
+        #     'cd': hp.quniform('cd', 0.4, 0.8, 0.1),
+        #     'tf': hp.quniform('tf', 0.5, 0.9, 0.1),
+        #     'ld': hp.quniform('ld', 0.1, 0.2, 0.05),
+        #     # 'max_len': scope.int(hp.quniform('max_len', 800, 1200, 100)),
+        #     # 'batch_size': scope.int(hp.quniform('batch_size', 10, 100, 10)),
+        # }
+
+        # DAMIC
         space = {
-            'lstm_layers': scope.int(hp.quniform('lstm_layers', 4, 8, 1)),
-            'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 300, 500, 20)),
+            'lstm_layers': scope.int(hp.quniform('lstm_layers', 2, 8, 1)),
+            'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 500, 1500, 100)),
             # 'dim': scope.int(hp.quniform('dim', 100, 300, 100)),
-            'lr': hp.quniform('lr', 0.0008, 0.002, 0.0001),
-            'filters': scope.int(hp.quniform('filters', 150, 250, 20)),
+            'lr': hp.quniform('lr', 0.0005, 0.002, 0.0001),
+            'filters': scope.int(hp.quniform('filters', 100, 300, 50)),
             # 'filter_sizes': scope.int(hp.quniform('filter_sizes', 3, 6, 1)),
-            'cd': hp.quniform('cd', 0.4, 0.8, 0.1),
-            'tf': hp.quniform('tf', 0.5, 0.9, 0.1),
-            'ld': hp.quniform('ld', 0.1, 0.2, 0.05),
+            'cd': hp.quniform('cd', 0.2, 0.8, 0.1),
+            'tf': hp.quniform('tf', 0.2, 0.9, 0.1),
+            'ld': hp.quniform('ld', 0.05, 0.2, 0.05),
             # 'max_len': scope.int(hp.quniform('max_len', 800, 1200, 100)),
             # 'batch_size': scope.int(hp.quniform('batch_size', 10, 100, 10)),
         }
@@ -393,14 +408,14 @@ def main(args):
             model_name = "DAMIC"
 
 
-        with io.open("./output/params/"+model_name+"_best_params.tab",'a',encoding="utf8") as bp:
+        with io.open("./output/"+model_name+"_best_params.tab",'a',encoding="utf8") as bp:
             corpus = args.data_file
             for k, v in best_params.items():
                 bp.write("\t".join([corpus, model_name, k, str(v)])+"\n")
         return best_params
         
 
-def run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning):
+def run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning, ms_tags):
     import torch
     import torch.nn as nn
     from torch.nn import functional as F
@@ -771,6 +786,7 @@ if __name__ == "__main__":
     train_parser.add_argument('--patient', type=int, default=5, nargs='?', help='number of epochs to wait if no improvement and then stop the training.')
     train_parser.add_argument('--lr', type=float, default=0.001, nargs='?', help='learning rate')
     train_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
+    train_parser.add_argument('--filter_sizes', type=int, default=[3,4,5], nargs='+', help='filter sizes')
     train_parser.add_argument('--filters', type=int, default=100, nargs='?', help='number of CNN kernel filters.')
     train_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
     train_parser.add_argument('--cd', type=float, default=0.5, nargs='?', help='CNN dropout')
