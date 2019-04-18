@@ -3,7 +3,7 @@ import torch
 from torch.utils import data as data_utils
 from itertools import chain
 
-# deprecated!
+# @deprecated
 class DAMICDataset(data_utils.Dataset):
     """Custom data.Dataset compatible with data.DataLoader."""
     def __init__(self, data, targets):
@@ -21,7 +21,7 @@ class DAMICDataset(data_utils.Dataset):
     def __len__(self):
         return self.num_total_seqs
 
-# deprecated!
+# @deprecated
 def collate_fn(data):
     """Creates mini-batch tensors from the list of tuples (src_seq, trg_seq).
     We should build a custom collate_fn rather than using default collate_fn,
@@ -75,7 +75,7 @@ def collate_fn(data):
 #             row.append([0] * max_u)
 #     return np.array(data)
 
-# deprecated!
+# @deprecated
 def unpad(data, lengths):
     ret = None
     for i, l in enumerate(lengths):

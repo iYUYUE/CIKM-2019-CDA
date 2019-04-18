@@ -380,21 +380,21 @@ def main(args):
 
         # DAMIC
         space = {
-            'lstm_layers': scope.int(hp.quniform('lstm_layers', 2, 8, 1)),
+            'lstm_layers': scope.int(hp.quniform('lstm_layers', 2, 6, 1)),
             'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 500, 1500, 100)),
             # 'dim': scope.int(hp.quniform('dim', 100, 300, 100)),
-            'lr': hp.quniform('lr', 0.0005, 0.002, 0.0001),
+            'lr': hp.quniform('lr', 0.0008, 0.002, 0.0001),
             'filters': scope.int(hp.quniform('filters', 100, 300, 50)),
             # 'filter_sizes': scope.int(hp.quniform('filter_sizes', 3, 6, 1)),
-            'cd': hp.quniform('cd', 0.2, 0.8, 0.1),
+            'cd': hp.quniform('cd', 0.4, 0.8, 0.1),
             'tf': hp.quniform('tf', 0.2, 0.9, 0.1),
-            'ld': hp.quniform('ld', 0.05, 0.2, 0.05),
+            'ld': hp.quniform('ld', 0.1, 0.3, 0.05),
             # 'max_len': scope.int(hp.quniform('max_len', 800, 1200, 100)),
             # 'batch_size': scope.int(hp.quniform('batch_size', 10, 100, 10)),
         }
 
 
-        best_params = fmin(fn=objective, space=space, algo=tpe.suggest, max_evals=1000)
+        best_params = fmin(fn=objective, space=space, algo=tpe.suggest, max_evals=100)
 
         best_params = space_eval(space,best_params)
 
