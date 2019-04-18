@@ -20,8 +20,8 @@ Dialogue Act Modelling in Information-seeking Conversations
 - Train: python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --baseline True
 
 ## DAMIC Model
-- Train: python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog
-- Test: python src/run.py test
+- Train: python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --cd 0.7 --filters 300 --ld 0.15 --lr 0.0012 --tf 0.4 --lstm_hidden 1300 --lstm_layers 2
+- Test: python src/run.py test --model ./model/cflqxkjqlc/ --epoch 6 --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --cd 0.7 --filters 300 --ld 0.15 --tf 0.4 --lstm_hidden 1300 --lstm_layers 2
 - Tune: python src/run.py tune --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog
 
 ## DAMIC Wide-and-Deep Model
