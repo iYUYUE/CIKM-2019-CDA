@@ -4,6 +4,12 @@ from torch.nn import functional as F
 from torch.autograd import Variable
 import math, random, string, os, sys
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from submodels.dynamic_k_max import DynamicKMaxPooling
+
+# def kmax_pooling(x, dim, k):
+#     # print(x.shape)
+#     index = x.topk(k, dim = dim)[1].sort(dim = dim)[0]
+#     return x.gather(dim, index)
 
 torch.manual_seed(1)
 
@@ -18,7 +24,7 @@ def create_emb_layer(weights_matrix, non_trainable=False):
     return emb_layer, num_embeddings, embedding_dim
 
 class CNN_Embedding(nn.Module):
-    def __init__(self, weights_matrix, n_filters, filter_sizes, c_dropout):
+    def __init__(self, weights_matrix, n_filters, filter_sizes, c_dropout, k=1):
         super(CNN_Embedding, self).__init__()
 
         # Embedding
@@ -27,8 +33,11 @@ class CNN_Embedding(nn.Module):
         # CNN
         self.convs = nn.ModuleList([nn.Conv2d(in_channels=1, out_channels=n_filters, kernel_size=(fs,embedding_dim)) for fs in filter_sizes])
         
-        
         self.dropout = nn.Dropout(c_dropout)
+
+        self.k = k
+
+        self.pool = DynamicKMaxPooling(k, n_filters)
 
     def forward(self, dialogue):
         # print(dialogue.size())
@@ -49,7 +58,11 @@ class CNN_Embedding(nn.Module):
             
         #conv_n = [batch size * timesteps, n_filters, sent len - filter_sizes[n]]
         
-        pooled = [F.max_pool1d(conv, conv.shape[2]).squeeze(2) for conv in conved]
+        # pooled = [F.max_pool1d(conv, conv.shape[2]).squeeze(2) for conv in conved]
+
+        pooled = [self.pool(conv, conv.shape[2]).squeeze(2) for conv in conved]
+
+        # pooled = [kmax_pooling(conv, 2, self.k).squeeze(2) for conv in conved]
         
         #pooled_n = [batch size * timesteps, n_filters]
         
