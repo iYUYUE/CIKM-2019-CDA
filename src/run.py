@@ -151,15 +151,44 @@ def vector2tags (l, ms_tags):
             ret = ret + ' ' + ms_tags[i]
     return ret
 
+def qu_parser (path, max_length):
+    all_dialogs = []
+    all_tags = []
+    new_dialogue = True
+    vocabulary = set()
+    dialog_utterances = None
+    max_len = 0
+    
+    with open(path, 'r') as f:
+        for line in f:
+            if line == '\n':
+                new_dialogue = True
+                continue
+            utterance = line.split('\t')
+            words = utterance[1].split()[:-1][:max_length]
+            tags = utterance[0].replace('_', ' ')
+            if len(words) > max_len:
+                max_len = len(words)
+            vocabulary = vocabulary.union(words)
+            if new_dialogue:
+                if dialog_utterances is not None:
+                    all_dialogs.append(dialog_utterances)
+                    all_tags.append(dialog_tags)
+                dialog_utterances = [' '.join(words)]
+                dialog_tags = [tags]
+                new_dialogue = False
+            else:
+                dialog_utterances.append(' '.join(words))
+                dialog_tags.append(tags)
+
+    return all_dialogs, all_tags, vocabulary, max_len
+
 def main(args):
 
     os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(str(x) for x in args.gpu)
     # print(os.environ["CUDA_VISIBLE_DEVICES"])
 
-    
-
     # data loading
-
     dim = args.dim
     seed = args.random
     max_length = args.max_len
@@ -181,57 +210,68 @@ def main(args):
     # nertypes = ['NUM', 'ORGANIZATION', 'PERSON', 'URL', 'LOCATION', 'EMAIL', 'TECH']
     nertypes = ['NUM', 'ORGANIZATION', 'PERSON', 'URL', 'LOCATION', 'TECH']
     # ms_entitiedbowpath = os.path.normpath("./data/msdialog/old/collapsed_msdialog.csv")
-    ms_entitiedbowpath = os.path.normpath(args.data_file+'.csv')
+    if not args.qu:
+        ms_entitiedbowpath = os.path.normpath(args.data_file+'.csv')
 
-    df = pd.read_csv(ms_entitiedbowpath)
+        df = pd.read_csv(ms_entitiedbowpath)
 
-    # conversation_numbers = df['conversation_no']
-    utterance_tags = df['tags']
-    utterances = df['utterance']
-    utterance_status = df['utterance_status']
-    utterance_lengths = df['utterance_lengths']
+        # conversation_numbers = df['conversation_no']
+        utterance_tags = df['tags']
+        utterances = df['utterance']
+        utterance_status = df['utterance_status']
+        utterance_lengths = df['utterance_lengths']
 
-    max_utterance_lengths = np.minimum(max(utterance_lengths), max_length)
-    print('max utterance length', max_utterance_lengths)
+        max_utterance_lengths = np.minimum(max(utterance_lengths), max_length)
+        print('max utterance length', max_utterance_lengths)
 
 
-    all_dialogs = []
-    all_tags = []
+        all_dialogs = []
+        all_tags = []
 
-    for i in range(len(utterances)):
-        if utterance_status[i] == "B":
-            dialog_utterances = [' '.join(utterances[i].split()[:max_length])]
-            dialog_tags = [utterance_tags[i]]
+        for i in range(len(utterances)):
+            if utterance_status[i] == "B":
+                dialog_utterances = [' '.join(utterances[i].split()[:max_length])]
+                dialog_tags = [utterance_tags[i]]
 
-        else:
-            dialog_utterances.append(' '.join(utterances[i].split()[:max_length]))
-            dialog_tags.append(utterance_tags[i])
-            if utterance_status[i] == 'E':
-                all_dialogs.append(dialog_utterances)
-                all_tags.append(dialog_tags)
+            else:
+                dialog_utterances.append(' '.join(utterances[i].split()[:max_length]))
+                dialog_tags.append(utterance_tags[i])
+                if utterance_status[i] == 'E':
+                    all_dialogs.append(dialog_utterances)
+                    all_tags.append(dialog_tags)
 
-    combo_dict = {}
-    for turn in all_tags:
-        for sent in turn:
-            labels = ' '.join(sorted(sent.split()))
-            combo_dict[labels] = combo_dict.setdefault(labels, 0) + 1
+        combo_dict = {}
+        for turn in all_tags:
+            for sent in turn:
+                labels = ' '.join(sorted(sent.split()))
+                combo_dict[labels] = combo_dict.setdefault(labels, 0) + 1
 
-    sorted_combos = sorted(combo_dict.items(), key=lambda x: x[1], reverse=True)
-    label_dict = {item[0]: item[1] for item in sorted_combos[:32]}
+        sorted_combos = sorted(combo_dict.items(), key=lambda x: x[1], reverse=True)
+        label_dict = {item[0]: item[1] for item in sorted_combos[:32]}
 
-    dialog_lengths = [len(dialog) for dialog in all_dialogs]
+        dialog_lengths = [len(dialog) for dialog in all_dialogs]
 
-    # print(label_dict)
+        # print(label_dict)
 
-    X_train, X_val, y_train, y_val = train_test_split(all_dialogs, all_tags, test_size=0.1, random_state=seed)
+        X_train, X_val, y_train, y_val = train_test_split(all_dialogs, all_tags, test_size=0.1, random_state=seed)
 
-    X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.1, random_state=seed)
+        X_train, X_test, y_train, y_test = train_test_split(X_train, y_train, test_size=0.1, random_state=seed)
+        
+        if args.da_filter:
+            print("[uncommon DAs filted]")
+            y_train = da_filter(label_dict, y_train)
+            y_val = da_filter(label_dict, y_val)
+            y_test = da_filter(label_dict, y_test)
+    else:
+        train_data_path = os.path.normpath('./data/msdialog/qu/train.tsv')
+        valid_data_path = os.path.normpath('./data/msdialog/qu/valid.tsv')
+        test_data_path = os.path.normpath('./data/msdialog/qu/test.tsv')
+        X_train, y_train, v_train, max_len_train = qu_parser(train_data_path, max_length)
+        X_val, y_val, v_val, max_len_val = qu_parser(valid_data_path, max_length)
+        X_test, y_test, v_test, max_len_test = qu_parser(test_data_path, max_length)
 
-    if args.da_filter:
-        print("[uncommon DAs filted]")
-        y_train = da_filter(label_dict, y_train)
-        y_val = da_filter(label_dict, y_val)
-        y_test = da_filter(label_dict, y_test)
+        max_utterance_lengths = max([max_len_train, max_len_val, max_len_test])
+        print('max utterance length', max_utterance_lengths)
 
     counts_train = [len(x) for x in y_train]
     counts_test = [len(x) for x in y_test]
@@ -263,22 +303,25 @@ def main(args):
 
 
     # read in dict
-    bow_dict = {}
-    target_vocab = []
-    with open(args.data_file+'.tab', 'r') as f:
-    # with open("./data/msdialog/old/entitied_bow.tab", 'r') as f:
-        for line in f:
-            items = line.split('\t')
-            key, value = items[0], int(items[1])
-            # bow_dict[key] = value
-            
-            # if int(value) > 5:
-            target_vocab.append(key)
-            
-    # if args.remove_ne:
-    #     print("[name entity tags removed]")
-    #     for term in nertypes:
-    #         del bow_dict[term]
+    if not args.qu:
+        bow_dict = {}
+        target_vocab = []
+        with open(args.data_file+'.tab', 'r') as f:
+        # with open("./data/msdialog/old/entitied_bow.tab", 'r') as f:
+            for line in f:
+                items = line.split('\t')
+                key, value = items[0], int(items[1])
+                # bow_dict[key] = value
+                
+                # if int(value) > 5:
+                target_vocab.append(key)
+                
+        # if args.remove_ne:
+        #     print("[name entity tags removed]")
+        #     for term in nertypes:
+        #         del bow_dict[term]
+    else:
+        target_vocab = v_train.union(v_val).union(v_test)
 
     output_size = len(ms_tags)
 
@@ -321,9 +364,6 @@ def main(args):
 
     print('Preparing data ...')
 
-    max_d = max(dialog_lengths)
-    max_u = max_utterance_lengths
-
     train_n_iters = len(X_train)
 
     train_data = [ [str2vector(word_to_ix, sent, True, max_utterance_lengths) for sent in X_train[i]] for i in range(train_n_iters)]
@@ -351,15 +391,24 @@ def main(args):
         run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning, ms_tags)
     else:
         def objective(params):
-            args.lstm_layers = params['lstm_layers']
-            args.lstm_hidden = params['lstm_hidden']
+            if 'lstm_layers' in params.keys():
+                args.lstm_layers = params['lstm_layers']
+            if 'lstm_hidden' in params.keys():
+                args.lstm_hidden = params['lstm_hidden']
             # args.dim = params['dim']
-            args.lr = params['lr']
-            args.filters = params['filters']
+            if 'lr' in params.keys():
+                args.lr = params['lr']
+            if 'filters' in params.keys():
+                args.filters = params['filters']
             # args.filter_sizes = params['filter_sizes']
-            args.cd = params['cd']
-            args.tf = params['tf']
-            args.ld = params['ld']
+            if 'cd' in params.keys():
+                args.cd = params['cd']
+            if 'tf' in params.keys():
+                args.tf = params['tf']
+            if 'ld' in params.keys():
+                args.ld = params['ld']
+            if 'k' in params.keys():
+                args.k = params['k']
             # args.max_len = params['max_len']
             return run(args, weights_matrix, output_size, train_data, train_target, val_data, val_target, test_data, test_target, tuning, ms_tags)
 
@@ -379,19 +428,66 @@ def main(args):
         # }
 
         # DAMIC
+        # space = {
+        #     'lstm_layers': scope.int(hp.quniform('lstm_layers', 2, 6, 1)),
+        #     'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 200, 1500, 100)),
+        #     # 'dim': scope.int(hp.quniform('dim', 100, 300, 100)),
+        #     'lr': hp.quniform('lr', 0.0008, 0.002, 0.0001),
+        #     'filters': scope.int(hp.quniform('filters', 100, 300, 50)),
+        #     # 'filter_sizes': scope.int(hp.quniform('filter_sizes', 3, 6, 1)),
+        #     'cd': hp.quniform('cd', 0.1, 0.4, 0.1),
+        #     # 'tf': hp.quniform('tf', 0.2, 0.9, 0.1),
+        #     'ld': hp.quniform('ld', 0.05, 0.2, 0.05),
+        #     # 'max_len': scope.int(hp.quniform('max_len', 800, 1200, 100)),
+        #     # 'batch_size': scope.int(hp.quniform('batch_size', 10, 100, 10)),
+        #     'k': scope.int(hp.quniform('k', 1, 6, 1)),
+        # }
+
+        # DAMIC kmax
         space = {
-            'lstm_layers': scope.int(hp.quniform('lstm_layers', 2, 6, 1)),
-            'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 500, 1500, 100)),
+            # 'lstm_layers': scope.int(hp.quniform('lstm_layers', 2, 6, 1)),
+            'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 200, 1000, 100)),
             # 'dim': scope.int(hp.quniform('dim', 100, 300, 100)),
             'lr': hp.quniform('lr', 0.0008, 0.002, 0.0001),
-            'filters': scope.int(hp.quniform('filters', 100, 300, 50)),
+            'filters': scope.int(hp.quniform('filters', 100, 400, 50)),
             # 'filter_sizes': scope.int(hp.quniform('filter_sizes', 3, 6, 1)),
-            'cd': hp.quniform('cd', 0.4, 0.8, 0.1),
-            'tf': hp.quniform('tf', 0.2, 0.9, 0.1),
-            'ld': hp.quniform('ld', 0.1, 0.3, 0.05),
+            'cd': hp.quniform('cd', 0.2, 0.6, 0.1),
+            # 'tf': hp.quniform('tf', 0.2, 0.9, 0.1),
+            'ld': hp.quniform('ld', 0.05, 0.4, 0.05),
             # 'max_len': scope.int(hp.quniform('max_len', 800, 1200, 100)),
             # 'batch_size': scope.int(hp.quniform('batch_size', 10, 100, 10)),
+            'k': scope.int(hp.quniform('k', 1, 10, 1)),
         }
+
+        # DAMIC Stacked
+        # space = {
+        #     'lstm_layers': scope.int(hp.quniform('lstm_layers', 2, 6, 1)),
+        #     'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 100, 500, 100)),
+        #     # 'dim': scope.int(hp.quniform('dim', 100, 300, 100)),
+        #     'lr': hp.quniform('lr', 0.0001, 0.002, 0.0001),
+        #     # 'filters': scope.int(hp.quniform('filters', 100, 300, 50)),
+        #     # 'filter_sizes': scope.int(hp.quniform('filter_sizes', 3, 6, 1)),
+        #     # 'cd': hp.quniform('cd', 0.2, 0.6, 0.1),
+        #     # 'tf': hp.quniform('tf', 0.2, 0.9, 0.1),
+        #     'ld': hp.quniform('ld', 0.1, 0.3, 0.05),
+        #     # 'max_len': scope.int(hp.quniform('max_len', 800, 1200, 100)),
+        #     # 'batch_size': scope.int(hp.quniform('batch_size', 10, 100, 10)),
+        # }
+
+        # baseline
+        # space = {
+        #     # 'lstm_layers': scope.int(hp.quniform('lstm_layers', 2, 6, 1)),
+        #     'lstm_hidden': scope.int(hp.quniform('lstm_hidden', 100, 1500, 100)),
+        #     # 'dim': scope.int(hp.quniform('dim', 100, 300, 100)),
+        #     'lr': hp.quniform('lr', 0.0008, 0.002, 0.0001),
+        #     'filters': scope.int(hp.quniform('filters', 100, 300, 50)),
+        #     # 'filter_sizes': scope.int(hp.quniform('filter_sizes', 3, 6, 1)),
+        #     'cd': hp.quniform('cd', 0.4, 0.8, 0.1),
+        #     # 'tf': hp.quniform('tf', 0.2, 0.9, 0.1),
+        #     # 'ld': hp.quniform('ld', 0.1, 0.3, 0.05),
+        #     # 'max_len': scope.int(hp.quniform('max_len', 800, 1200, 100)),
+        #     # 'batch_size': scope.int(hp.quniform('batch_size', 10, 100, 10)),
+        # }
 
 
         best_params = fmin(fn=objective, space=space, algo=tpe.suggest, max_evals=100)
@@ -404,12 +500,17 @@ def main(args):
             model_name = "baseline"
         elif args.wd:
             model_name = "DAMIC_wd"
+        elif args.stacked:
+            model_name = "DAMIC_stacked"
         else:
             model_name = "DAMIC"
 
 
         with io.open("./output/"+model_name+"_best_params.tab",'a',encoding="utf8") as bp:
-            corpus = args.data_file
+            if not args.qu:
+                corpus = args.data_file
+            else:
+                corpus = "qu"
             for k, v in best_params.items():
                 bp.write("\t".join([corpus, model_name, k, str(v)])+"\n")
         return best_params
@@ -424,10 +525,12 @@ def run(args, weights_matrix, output_size, train_data, train_target, val_data, v
     from torch.utils import data as data_utils
 
     if args.baseline:
-        from baseline import DAMIC
+        from base import baseline as DAMIC
     elif args.wd:
-        assert args.tf is not None
+        assert hasattr(args, 'tf')
         from DAMIC_wd import DAMIC
+    elif args.stacked:
+        from DAMIC_stacked import DAMIC
     else:
         from DAMIC import DAMIC
 
@@ -451,7 +554,13 @@ def run(args, weights_matrix, output_size, train_data, train_target, val_data, v
         c_dropout = args.cd
         l_dropout = args.ld
         batch_size = args.batch_size
-        teacher_forcing_ratio = args.tf
+        gru = args.gru
+        highway = args.highway
+        kmax = args.k
+        if hasattr(args, 'tf') and args.tf is not None:
+            teacher_forcing_ratio = args.tf
+        else:
+            teacher_forcing_ratio = None
 
         save_path = './model/'+randomword(10)+'/'
 
@@ -470,13 +579,16 @@ def run(args, weights_matrix, output_size, train_data, train_target, val_data, v
             print('CNN dropout', c_dropout)
             print('LSTM dropout', l_dropout)
             print('Teacher Forcing rate', teacher_forcing_ratio)
+            print('GRU', gru)
+            print('RNN Highway', highway)
+            print('k max pooling', kmax)
             print()
         print('model will be saved to', save_path)
         if not os.path.exists(save_path):
             os.makedirs(save_path)
 
         # torch.backends.cudnn.enabled = False
-        model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio)
+        model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio, gru, highway, kmax)
         model = model.to(device)
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -566,6 +678,8 @@ def run(args, weights_matrix, output_size, train_data, train_target, val_data, v
             epoch = best_epoch
             result_file = ''
             loss_file = ''
+            if teacher_forcing_ratio is not None:
+                teacher_forcing_ratio = .0
         else:
             directory = args.models[0]
             epoch = args.epoch
@@ -582,9 +696,15 @@ def run(args, weights_matrix, output_size, train_data, train_target, val_data, v
             l_dropout = args.ld
             test_discount = args.discount
             batch_size = args.batch_size
-            teacher_forcing_ratio = args.tf
-            if teacher_forcing_ratio is not None:
+            gru = args.gru
+            highway = args.highway
+            kmax = args.k
+
+            if hasattr(args, 'tf') and args.tf is not None:
                 teacher_forcing_ratio = .0
+            else:
+                teacher_forcing_ratio = None
+            
 
         if not tuning:
             print('lstm_hidden_size', hidden_size)
@@ -597,6 +717,9 @@ def run(args, weights_matrix, output_size, train_data, train_target, val_data, v
             print('LSTM dropout', l_dropout)
             print('test discount', test_discount)
             print('Teacher Forcing rate', teacher_forcing_ratio)
+            print('GRU', gru)
+            print('RNN Highway', highway)
+            print('k max pooling', kmax)
 
         if result_file and result_file != '':
             outf = open(result_file, 'w')
@@ -610,7 +733,7 @@ def run(args, weights_matrix, output_size, train_data, train_target, val_data, v
         bpredicts = []
         bfile = ''
 
-        model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio)
+        model = DAMIC(hidden_size, output_size, bi_lstm, weights_matrix, num_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio, gru, highway, kmax)
         model = model.to(device)
 
         if torch.cuda.device_count() > 1:
@@ -726,8 +849,9 @@ def run(args, weights_matrix, output_size, train_data, train_target, val_data, v
                 predicts = np.append(predicts, predict, axis=0)
                 # print('p', p)
                 # print('r', r)
-                # if result_file != '':
-                #     out = out + str(i) + ',' + str(j)  + ',' + str(len(predict)) + ',' + str(len(X_test[i][j].split())) + ',"' + X_test[i][j] + '",' + vector2tags(r, ms_tags) + ',' + vector2tags(p, ms_tags) + ',' + str(hamming_score(r, p)) + ',' + str(f1(r, p)[0]) + ',' + str(f1(r, p)[1]) + ',' + str(f1(r, p)[2]) + '\n'
+            if result_file and result_file != '':
+                for d in src_seqs
+                    out = out + str(len(predict)) + ',' + str(len(X_test[i][j].split())) + ',"' + X_test[i][j] + '",' + vector2tags(r, ms_tags) + ',' + vector2tags(p, ms_tags) + ',' + str(hamming_score(r, p)) + ',' + str(f1(r, p)[0]) + ',' + str(f1(r, p)[1]) + ',' + str(f1(r, p)[2]) + '\n'
 
         tloss = loss / len(test_loader_dataset)
         if not tuning:
@@ -782,7 +906,10 @@ if __name__ == "__main__":
     train_parser.add_argument('--epoch', type=int, default=1000, nargs='?', help='number of epochs to run')
     train_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
     train_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
-    train_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
+    train_parser.add_argument('--data_file', type=str, nargs='?', help='data file')
+    train_parser.add_argument("--qu", type=str2bool, nargs='?',const=True, default=False, help="load data from Qu's dataset")
+    train_parser.add_argument("--highway", type=str2bool, nargs='?',const=True, default=False, help="RNN input highway")
+    train_parser.add_argument("--gru", type=str2bool, nargs='?',const=True, default=False, help="use GRU instead of LSTM")
     train_parser.add_argument('--patient', type=int, default=5, nargs='?', help='number of epochs to wait if no improvement and then stop the training.')
     train_parser.add_argument('--lr', type=float, default=0.001, nargs='?', help='learning rate')
     train_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
@@ -799,18 +926,27 @@ if __name__ == "__main__":
     train_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
     train_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
     train_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
+    train_parser.add_argument("--stacked", type=str2bool, nargs='?',const=True, default=False, help="stacked RNN mode")
+    train_parser.add_argument('--k', type=int, default=1, nargs='?', help='k max pooling')
 
     # A tuning command
     tune_parser = subparsers.add_parser('tune', help='tune the model')
+    tune_parser.add_argument('--lstm_layers', type=int, default=2, nargs='?', help='number of layers in LSTM')
     tune_parser.add_argument('--dim', type=int, default=100, nargs='?', help='dimension of word embeddings')
     tune_parser.add_argument('--epoch', type=int, default=1000, nargs='?', help='number of epochs to run')
     tune_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
     tune_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
-    tune_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
+    tune_parser.add_argument('--data_file', type=str, nargs='?', help='data file')
+    tune_parser.add_argument("--qu", type=str2bool, nargs='?',const=True, default=False, help="load data from Qu's dataset")
+    tune_parser.add_argument("--highway", type=str2bool, nargs='?',const=True, default=False, help="RNN input highway")
+    tune_parser.add_argument("--gru", type=str2bool, nargs='?',const=True, default=False, help="use GRU instead of LSTM")
     tune_parser.add_argument('--patient', type=int, default=5, nargs='?', help='number of epochs to wait if no improvement and then stop the training.')
     tune_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
     tune_parser.add_argument('--filter_sizes', type=int, default=[3,4,5], nargs='+', help='filter sizes')
+    tune_parser.add_argument('--filters', type=int, default=100, nargs='?', help='number of CNN kernel filters.')
     tune_parser.add_argument('--random', type=int, default=42, nargs='?', help='random seed')
+    tune_parser.add_argument('--cd', type=float, default=0.5, nargs='?', help='CNN dropout')
+    tune_parser.add_argument('--ld', type=float, default=0.05, nargs='?', help='LSTM dropout')
     tune_parser.add_argument('--max_len', type=int, default=800, nargs='?', help='max length of utterance')
     tune_parser.add_argument("--msdialog", type=str2bool, nargs='?',const=True, default=False, help="msdialog embedding")
     tune_parser.add_argument("--swda", type=str2bool, nargs='?',const=True, default=False, help="swda corpus")
@@ -818,6 +954,8 @@ if __name__ == "__main__":
     tune_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
     tune_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
     tune_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
+    tune_parser.add_argument("--stacked", type=str2bool, nargs='?',const=True, default=False, help="stacked RNN mode")
+    tune_parser.add_argument('--k', type=int, default=1, nargs='?', help='k max pooling')
 
      # A test command
     test_parser = subparsers.add_parser('test', help='test the model')
@@ -829,7 +967,10 @@ if __name__ == "__main__":
     test_parser.add_argument('--output_result', type=str, default=[''], nargs=1, help='file to store the test case result')
     test_parser.add_argument("--remove_ne", type=str2bool, nargs='?',const=True, default=False, help="remove name entity tags")
     test_parser.add_argument("--da_filter", type=str2bool, nargs='?',const=True, default=False, help="filt uncommon DAs")
-    test_parser.add_argument('--data_file', type=str, nargs='?', help='data file', required=True)
+    test_parser.add_argument('--data_file', type=str, nargs='?', help='data file')
+    test_parser.add_argument("--qu", type=str2bool, nargs='?',const=True, default=False, help="load data from Qu's dataset")
+    test_parser.add_argument("--highway", type=str2bool, nargs='?',const=True, default=False, help="RNN input highway")
+    test_parser.add_argument("--gru", type=str2bool, nargs='?',const=True, default=False, help="use GRU instead of LSTM")
     test_parser.add_argument('--output_loss', type=str, nargs='?', help='loss output file')
     test_parser.add_argument("--bi", type=str2bool, nargs='?',const=True, default=True, help="Bi-LSTM")
     test_parser.add_argument('--filters', type=int, default=100, nargs='?', help='number of CNN kernel filters.')
@@ -846,6 +987,8 @@ if __name__ == "__main__":
     test_parser.add_argument('--gpu', type=int, default=[3,2,1,0], nargs='+', help='used gpu')
     test_parser.add_argument("--wd", type=str2bool, nargs='?',const=True, default=False, help="wide and deep mode")
     test_parser.add_argument("--baseline", type=str2bool, nargs='?',const=True, default=False, help="baseline mode")
+    test_parser.add_argument("--stacked", type=str2bool, nargs='?',const=True, default=False, help="stacked RNN mode")
+    test_parser.add_argument('--k', type=int, default=1, nargs='?', help='k max pooling')
 
     dataset_parser = subparsers.add_parser('dataset', help='save the dataset files')
 

@@ -4,24 +4,11 @@ from torch.nn import functional as F
 from torch.autograd import Variable
 import math, random, string, os, sys
 from submodels.context_feature_extractor import CNN_Embedding
+from DAMIC import DAMIC as basemodel
 
 torch.manual_seed(1)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# @deprecated
-def argmax(vec):
-    # return the argmax as a python int
-    _, idx = torch.max(vec, 1)
-    return idx.item()
-
-# @deprecated
-# Compute log sum exp in a numerically stable way for the forward algorithm
-def log_sum_exp(vec):
-    max_score = vec[0, argmax(vec)]
-    max_score_broadcast = max_score.view(1, -1).expand(1, vec.size()[1])
-    return max_score + \
-        torch.log(torch.sum(torch.exp(vec - max_score_broadcast)))
 
 def construct_rnn(input_size, hidden_size, lstm_layers, l_dropout, gru):
     if gru:
@@ -30,16 +17,28 @@ def construct_rnn(input_size, hidden_size, lstm_layers, l_dropout, gru):
         return nn.LSTM(input_size, hidden_size, num_layers = lstm_layers, dropout = l_dropout, bidirectional = False, batch_first=True)
 
 class DAMIC(nn.Module):
-    def __init__(self, hidden_size, output_size, bi, weights_matrix, lstm_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio=None, gru=False, highway=False, k=1):
+    def __init__(self, hidden_size, output_size, bi, weights_matrix, lstm_layers, n_filters, filter_sizes, c_dropout, l_dropout, teacher_forcing_ratio = None, gru = False, highway=False):
         super(DAMIC, self).__init__()
+        self.highway = highway
+        self.base = basemodel(hidden_size=1100, output_size=output_size, bi=True, weights_matrix=weights_matrix, lstm_layers=2, n_filters=200, filter_sizes=[3,4,5], c_dropout=0.4, l_dropout=0.2, teacher_forcing_ratio=None, gru=False, highway=False)
+        # bmodel = bmodel.to(device)
+        # bmodel = nn.DataParallel(bmodel)
+        # original saved file with DataParallel
+        state_dict = torch.load('./model/rnmoaknnpi/6')
+        # create new OrderedDict that does not contain `module.`
+        from collections import OrderedDict
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            name = k[7:] # remove `module.`
+            new_state_dict[name] = v
+        # load params
+        self.base.load_state_dict(new_state_dict)
+        self.base.eval()
 
         # self.hidden_size = hidden_size
         self.output_size = output_size
         self.bi = bi
-        self.highway = highway
         self.teacher_forcing_ratio = teacher_forcing_ratio
-
-        self.context_feature_extractor = CNN_Embedding(weights_matrix, n_filters, filter_sizes, c_dropout, k)
     
         # self.fc = nn.Sequential(
         #     nn.Linear(len(filter_sizes)*n_filters, hidden_size),
@@ -55,7 +54,7 @@ class DAMIC(nn.Module):
         #   nn.Dropout(p=0.2),
         # )
         
-        input_size = len(filter_sizes)*n_filters*k
+        input_size = output_size
 
         if bi:
             self.rnn = construct_rnn(input_size, hidden_size, lstm_layers, l_dropout, gru)
@@ -88,11 +87,15 @@ class DAMIC(nn.Module):
         # print(dialogue.size())
 
         batch_size, timesteps, sent_len = dialogue.size()
+
+        c_out = self.base(dialogue, targets)
+        c_out = c_out.view(batch_size * timesteps, -1)
+        thresholds = [0.48970118, 0.34025221, 0.17722994, 0.32379692, 0.1723266, 0.33252252, 0.26682911, 0.26431107, 0.2005045, 0.22233647, 0.50928269, 0.35311607]
+        thresholds = torch.FloatTensor(thresholds).to(device)
+        c_out = c_out > thresholds
+        c_out = c_out.float()
+        # print(c_out)
         
-        c_out = self.context_feature_extractor(dialogue)
-
-        #c_out = [batch size * timesteps, n_filters * len(filter_sizes)]
-
         r_in = c_out.view(batch_size, timesteps, -1)
         
         max_len = r_in.size()[1]
@@ -136,7 +139,7 @@ class DAMIC(nn.Module):
 
             if self.highway:
                 r_out_step = torch.cat((rnn_input, r_out_step), dim=2)
-
+            
             predict_vec[i] = self.h2o(r_out_step)                
         
         predicts = torch.cat(predict_vec, dim=1)
