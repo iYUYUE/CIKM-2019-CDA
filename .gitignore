@@ -106,3 +106,6 @@ venv.bak/
 # data file
 src/model/*
 src/output/*
+
+# Apple staff
+.DS_Store
