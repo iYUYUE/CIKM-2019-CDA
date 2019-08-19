@@ -20,7 +20,7 @@ This is the implementation for the CRNN model proposed in the CIKM'19 paper [Mod
 ```
 python src/run.py train --data_file ./data/msdialog/cnn/embedding_collapsed_spacytokenized_msdialog --baseline True
 ```
-## DAMIC Model
+## CRNN Model
 
 to train, test and tune the base model with Teacher Forcing
 
